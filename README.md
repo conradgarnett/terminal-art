@@ -25,7 +25,7 @@ The per-cell rotation geometry is precomputed once and the tile lookup uses a sp
 | `PALETTE_SPEED` | how fast the cluster palette drifts |
 | `SATURATION` | color richness |
 
-Colors sit edge-to-edge (no outlines), so the ML clusters read as flat color fields. The offline clustering script lives in `bake_spectre.py`.
+There are no outlines (they read as grey at this scale); instead the ML cluster sets each tile's **hue** while each tile gets its own **brightness**, so neighboring spectres read as distinct stained-glass facets. The offline clustering script lives in `bake_spectre.py`.
 
 ### `plasma.py`
 A morphing truecolor plasma field built from layered sine waves, cycling through an HSV color wheel with brightness driving an ASCII intensity ramp.

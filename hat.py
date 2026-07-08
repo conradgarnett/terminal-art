@@ -99,6 +99,9 @@ def main():
     BB = [t["bb"] for t in tiles]
     PTS = [t["pts"] for t in tiles]
     KT = [t["k"] for t in tiles]  # ML cluster label per tile
+    # per-tile brightness so neighboring tiles read as distinct facets
+    # (shows the individual shapes) while the cluster sets the hue
+    VJIT = [(i * 0.7548776662) % 1.0 for i in range(len(tiles))]
 
     sys.stdout.write("\033[?25l\033[?1049h")
 
@@ -218,12 +221,12 @@ def main():
             C = -theta + TWIST * math.log(s0)
             idg = id_grid(PX, PY, math.cos(C), math.sin(C), 1.0 / s0, W, H)
 
-            # color by ML cluster: tiles sharing a local motif share a color,
-            # so the coloring exposes the tiling's recurring local structure.
-            # Deep palette (val capped) so nothing reads as washed-out white.
+            # color by ML cluster (hue) so the palette exposes the tiling's
+            # recurring local motifs, but shade each tile individually so the
+            # spectre shapes stay visible without any grey outlines.
             drift = t * PALETTE_SPEED
-            kcolor = [hsv_to_rgb((k / NCLUST + drift) % 1.0, SATURATION, 0.80)
-                      for k in range(NCLUST)]
+            khue = [(k / NCLUST + drift) % 1.0 for k in range(NCLUST)]
+            colcache = {-1: BG}
 
             out = ["\033[H"]
             last = None
@@ -231,7 +234,11 @@ def main():
                 ig = idg[row]
                 for col in range(W):
                     idx = ig[col]
-                    rgb = BG if idx < 0 else kcolor[KT[idx]]
+                    rgb = colcache.get(idx)
+                    if rgb is None:
+                        rgb = hsv_to_rgb(khue[KT[idx]], SATURATION,
+                                         0.52 + 0.40 * VJIT[idx])
+                        colcache[idx] = rgb
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
