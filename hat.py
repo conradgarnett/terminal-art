@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-hat.py — the aperiodic monotile, alive in your terminal.
+hat.py — the aperiodic monotile, in an endless Droste zoom.
 
 Renders a tiling of "the hat" (Smith, Myers, Kaplan & Goodman-Strauss's
 2023 aperiodic monotile — a single 13-sided shape that tiles the plane
-but never repeats periodically). A vivid plasma field flows across the
-tiles like light through stained glass, and the reflected "anti-hats"
-(the ~1-in-7 mirror-image tiles the tiling can't avoid) glow as accents.
+but never repeats periodically) and falls into it forever: a seamless
+infinite zoom with a slow rotation, like an Escher staircase for tiles.
+
+The illusion: the tiling is drawn at two zoom levels one octave apart and
+crossfaded. As the big octave grows too large and fades out, the small
+one grows into the exact size the big one started at — so the loop never
+shows a seam. A vivid plasma field flows across everything as it spins.
 
 The tiling geometry lives in hat_tiling.json (baked offline from Craig
 Kaplan's substitution system) so this renderer is pure standard library.
@@ -24,15 +28,20 @@ import sys
 import time
 
 # ---- knobs -----------------------------------------------------------------
-UNITS_ACROSS = 18.0           # world units shown across the width (lower = zoom in)
+UNITS_ACROSS = 16.0           # world units across the width at the base zoom
 FPS = 24
+ZOOM_PERIOD = 6.0             # seconds to zoom in by one octave (2x)
+ZOOM_DIR = 1                  # 1 = fall inward, -1 = pull outward
+ROT_SPEED = 0.12              # rotation, radians/sec (0 = no spin)
 PALETTE_SPEED = 0.06          # how fast the colors cycle
-FLOW_SPEED = 0.6             # how fast the plasma flows across the tiling
+FLOW_SPEED = 0.6             # how fast the plasma flows
 SATURATION = 0.85             # color richness (0 = gray, 1 = neon)
 GROUT = (24, 24, 30)          # color of the lines between tiles
+BG = (10, 10, 14)             # color outside the tiling
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "hat_tiling.json")
+BUCKET = 4.0                  # spatial-hash cell size (~ one tile wide)
 
 
 def hsv_to_rgb(h, s, v):
@@ -55,69 +64,26 @@ def load_tiles():
     tiles = []
     for t in data["tiles"]:
         pts = [(float(x), float(y)) for x, y in t["p"]]
-        cx = sum(p[0] for p in pts) / len(pts)
-        cy = sum(p[1] for p in pts) / len(pts)
-        tiles.append({"pts": pts, "cx": cx, "cy": cy, "r": bool(t["r"])})
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        tiles.append({
+            "pts": pts,
+            "cx": sum(xs) / len(xs),
+            "cy": sum(ys) / len(ys),
+            "r": bool(t["r"]),
+            "bb": (min(xs), max(xs), min(ys), max(ys)),
+        })
     return tiles
 
 
-def point_in_poly(px, py, pts):
-    inside = False
-    n = len(pts)
-    j = n - 1
-    for i in range(n):
-        xi, yi = pts[i]
-        xj, yj = pts[j]
-        if ((yi > py) != (yj > py)) and \
-           (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
-            inside = not inside
-        j = i
-    return inside
-
-
-def build_map(tiles, W, H):
-    """Assign each terminal cell to a tile. Returns (cellmap, edge, wcx, wcy)."""
-    wcx = sum(t["cx"] for t in tiles) / len(tiles)
-    wcy = sum(t["cy"] for t in tiles) / len(tiles)
-    sx = W / UNITS_ACROSS
-    sy = sx * 0.5  # terminal cells are ~2x taller than wide -> undistort
-
-    def to_screen(x, y):
-        return ((x - wcx) * sx + W / 2.0, H / 2.0 - (y - wcy) * sy)
-
-    cellmap = [[-1] * W for _ in range(H)]
+def build_hash(tiles):
+    grid = {}
     for idx, t in enumerate(tiles):
-        spts = [to_screen(x, y) for x, y in t["pts"]]
-        xs = [p[0] for p in spts]
-        ys = [p[1] for p in spts]
-        minx = max(0, int(math.floor(min(xs))))
-        maxx = min(W - 1, int(math.ceil(max(xs))))
-        miny = max(0, int(math.floor(min(ys))))
-        maxy = min(H - 1, int(math.ceil(max(ys))))
-        if minx > maxx or miny > maxy:
-            continue
-        for row in range(miny, maxy + 1):
-            py = row + 0.5
-            crow = cellmap[row]
-            for col in range(minx, maxx + 1):
-                if crow[col] == -1 and point_in_poly(col + 0.5, py, spts):
-                    crow[col] = idx
-
-    # edge = a cell whose right or down neighbor sits in a different tile.
-    # Only two directions -> single-width grout lines instead of double.
-    edge = [[False] * W for _ in range(H)]
-    for row in range(H):
-        for col in range(W):
-            me = cellmap[row][col]
-            if me == -1:
-                continue
-            for dr, dc in ((0, 1), (1, 0)):
-                r2, c2 = row + dr, col + dc
-                if (0 <= r2 < H and 0 <= c2 < W and cellmap[r2][c2] != me
-                        and cellmap[r2][c2] != -1):
-                    edge[row][col] = True
-                    break
-    return cellmap, edge, wcx, wcy
+        x0, x1, y0, y1 = t["bb"]
+        for gx in range(int(x0 // BUCKET), int(x1 // BUCKET) + 1):
+            for gy in range(int(y0 // BUCKET), int(y1 // BUCKET) + 1):
+                grid.setdefault((gx, gy), []).append(idx)
+    return grid
 
 
 def plasma(x, y, t):
@@ -125,11 +91,13 @@ def plasma(x, y, t):
          + math.sin(y * 0.30 - t * FLOW_SPEED * 0.8)
          + math.sin((x + y) * 0.22 + t * FLOW_SPEED * 1.1)
          + math.sin(math.hypot(x, y) * 0.30 - t * FLOW_SPEED))
-    return (v + 4.0) / 8.0  # -> 0..1
+    return (v + 4.0) / 8.0
 
 
 def main():
     tiles = load_tiles()
+    grid = build_hash(tiles)
+
     sys.stdout.write("\033[?25l\033[?1049h")
 
     def cleanup(*_):
@@ -140,59 +108,130 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    grout_sgr = f"\033[38;2;{GROUT[0]};{GROUT[1]};{GROUT[2]}m"
-    size = None
-    cellmap = edge = None
+    def id_grid(scale, theta, W, H, cx, cy):
+        """Which tile covers each cell, at a given scale + rotation."""
+        ct = math.cos(theta)
+        st = math.sin(theta)
+        sy = scale * 0.5  # undistort ~2:1 character cells
+        g = grid
+        tl = tiles
+        b = BUCKET
+        out = [[-1] * W for _ in range(H)]
+        for row in range(H):
+            yr = -(row + 0.5 - cy) / sy
+            yst = yr * st
+            yct = yr * ct
+            orow = out[row]
+            for col in range(W):
+                xr = (col + 0.5 - cx) / scale
+                x = xr * ct + yst
+                y = -xr * st + yct
+                bucket = g.get((int(x // b) if x >= 0 else int(math.floor(x / b)),
+                                int(y // b) if y >= 0 else int(math.floor(y / b))))
+                if not bucket:
+                    continue
+                for idx in bucket:
+                    x0, x1, y0, y1 = tl[idx]["bb"]
+                    if x < x0 or x > x1 or y < y0 or y > y1:
+                        continue
+                    pts = tl[idx]["pts"]
+                    inside = False
+                    j = 12
+                    for i in range(13):
+                        xi, yi = pts[i]
+                        xj, yj = pts[j]
+                        if ((yi > y) != (yj > y)) and \
+                           (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
+                            inside = not inside
+                        j = i
+                    if inside:
+                        orow[col] = idx
+                        break
+        return out
+
+    def edges(idg, W, H):
+        e = [[0] * W for _ in range(H)]
+        for row in range(H):
+            ir = idg[row]
+            inx = idg[row + 1] if row + 1 < H else None
+            er = e[row]
+            for col in range(W):
+                me = ir[col]
+                if me == -1:
+                    continue
+                if (col + 1 < W and ir[col + 1] != me) or \
+                   (inx is not None and inx[col] != me):
+                    er[col] = 1
+        return e
+
     frame = 0
     try:
         while True:
             cols, rows = shutil.get_terminal_size((80, 24))
             H = rows - 1
-            if (cols, rows) != size:
-                size = (cols, rows)
-                cellmap, edge, _, _ = build_map(tiles, cols, H)
+            W = cols
+            cx, cy = W / 2.0, H / 2.0
             t = frame * (1.0 / FPS)
+            theta = ROT_SPEED * t
 
-            # one flat color per tile this frame -> flowing stained glass
-            tint = {}
-            for row in range(H):
-                for idx in cellmap[row]:
-                    if idx != -1 and idx not in tint:
-                        tl = tiles[idx]
-                        v = plasma(tl["cx"], tl["cy"], t)
-                        if tl["r"]:  # reflected anti-hat -> contrasting glow
-                            hue = (v * 0.6 + t * PALETTE_SPEED + 0.5) % 1.0
-                            rgb = hsv_to_rgb(hue, SATURATION,
-                                             0.55 + 0.45 * v)
-                        else:
-                            hue = (v * 0.6 + t * PALETTE_SPEED) % 1.0
-                            rgb = hsv_to_rgb(hue, SATURATION,
-                                             0.30 + 0.60 * v)
-                        tint[idx] = rgb
+            s0 = W / UNITS_ACROSS
+            z = (t / ZOOM_PERIOD) * ZOOM_DIR
+            f = z - math.floor(z)          # 0..1 within the octave
+            s_hi = s0 * (2.0 ** f)         # big octave, fades out
+            s_lo = s0 * (2.0 ** (f - 1))   # small octave, fades in
+            w_lo = f * f * (3.0 - 2.0 * f)  # smoothstep crossfade
+            w_hi = 1.0 - w_lo
 
+            idhi = id_grid(s_hi, theta, W, H, cx, cy)
+            idlo = id_grid(s_lo, theta, W, H, cx, cy)
+            ehi = edges(idhi, W, H)
+            elo = edges(idlo, W, H)
+
+            # flat plasma color per encountered tile
+            colcache = {-1: BG}
+            for grd in (idhi, idlo):
+                for row in grd:
+                    for idx in row:
+                        if idx not in colcache:
+                            tl = tiles[idx]
+                            v = plasma(tl["cx"], tl["cy"], t)
+                            if tl["r"]:  # reflected anti-hat -> contrasting glow
+                                hue = (v * 0.6 + t * PALETTE_SPEED + 0.5) % 1.0
+                                colcache[idx] = hsv_to_rgb(hue, SATURATION,
+                                                           0.55 + 0.45 * v)
+                            else:
+                                hue = (v * 0.6 + t * PALETTE_SPEED) % 1.0
+                                colcache[idx] = hsv_to_rgb(hue, SATURATION,
+                                                           0.30 + 0.60 * v)
+
+            gr0, gr1, gr2 = GROUT
             out = ["\033[H"]
             last = None
             for row in range(H):
-                crow = cellmap[row]
-                erow = edge[row]
-                for col in range(cols):
-                    idx = crow[col]
-                    if idx == -1:
-                        if last is not None:
-                            out.append("\033[0m")
-                            last = None
-                        out.append(" ")
-                        continue
-                    rgb = GROUT if erow[col] else tint[idx]
+                ih = idhi[row]
+                il = idlo[row]
+                eh = ehi[row]
+                el = elo[row]
+                for col in range(W):
+                    ch = colcache[ih[col]]
+                    cl = colcache[il[col]]
+                    r = w_hi * ch[0] + w_lo * cl[0]
+                    g = w_hi * ch[1] + w_lo * cl[1]
+                    b = w_hi * ch[2] + w_lo * cl[2]
+                    gf = w_hi * eh[col] + w_lo * el[col]
+                    if gf > 0.0:
+                        inv = 1.0 - gf
+                        r = r * inv + gr0 * gf
+                        g = g * inv + gr1 * gf
+                        b = b * inv + gr2 * gf
+                    rgb = (int(r), int(g), int(b))
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
                     out.append("█")
-                out.append("\033[0m\n")
-                last = None
-
-            out.append(grout_sgr + "  the hat · aperiodic monotile · "
-                       "Ctrl-C to quit ")
+                out.append("\n")
+            out.append("\033[0m\033[38;2;120;120;120m"
+                       "  the hat · infinite zoom · Ctrl-C to quit ")
             sys.stdout.write("".join(out))
             sys.stdout.flush()
 
