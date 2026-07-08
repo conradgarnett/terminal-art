@@ -2,22 +2,18 @@
 
 Pictures made from nothing but equations.
 
-## `landscape.py` — a seascape of line segments
+## `landscape.py` — a superposition of graphs
 
-![the rendered seascape](landscape.png)
+![the rendered superposition](landscape.png)
 
-A sunrise over the sea, built the way mathematician-artist **Hamid Naderi Yeganeh** builds his images: the entire picture is families of straight **line segments** whose endpoints are explicit trigonometric functions of an index `k`. Where the segments crowd, the plane darkens or glows; where they fan out, it fades. Nothing is drawn freehand or filled.
+Six families of parametric curves — each a single equation, each drawn many times in rotational symmetry — laid over one another until no individual graph can be picked out; only the woven whole remains. The generating equations are printed beneath the image, colour-matched to their curves:
 
-Three families make the scene:
-
-- **Sun** — segment `k` joins the center `C` to a point on a spiked circle,
-  `P(k) = C + R₀(1 + 0.09·sin12θ)(cosθ, sinθ)`, `θ = 2πk/N`. The segments
-  crowd near `C` into a bright disc and fan outward into a soft corona.
-- **Sea** — streamlines of a **domain-warped flow field**: the flow direction is
-  `sin(… sin(… sin(…)))`, sines nested inside sines, until the sinusoids are
-  unreadable and only turbulent current remains. Segments beneath the sun are
-  gold, tracing its shimmering reflection.
-- **Birds** — small twin-arc segment fans, `y ∝ |sin πt|`.
+- **Maurer roses** — `r = sin(nθ)`, `θ = i·d°`
+- **rose curves** — `r = cos(kθ)`
+- **epicycloids** — `x = (a+b)cos t − b·cos((a+b)/b·t)`, `y = …`
+- **Lissajous figures** — `x = sin(pt+δ)`, `y = sin(qt)`
+- **hypotrochoids** (spirograph) — `x = (a−b)cos t + h·cos((a−b)/b·t)`, `y = …`
+- **a harmonograph** — damped sums of sines, `x = Σ e^(−λt)·sin(ft+φ)`
 
 ```bash
 python3 landscape.py      # writes landscape.png
