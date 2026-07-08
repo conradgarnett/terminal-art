@@ -30,14 +30,12 @@ import time
 # ---- knobs -----------------------------------------------------------------
 UNITS_ACROSS = 12.0           # world units across the width at the base zoom
 FPS = 24
-ZOOM_PERIOD = 6.0             # seconds to zoom in by one octave (2x)
+ZOOM_PERIOD = 2.5             # seconds to zoom out by one octave (2x)
 ZOOM_DIR = -1                 # 1 = fall inward, -1 = pull outward
-ROT_SPEED = 0.16              # steady rotation, radians/sec (0 = no spin)
-TWIST = 0.6                   # log-spiral: twist per e-fold of radius (0 = off)
-PALETTE_SPEED = 0.06          # how fast the colors cycle
-FLOW_SPEED = 0.6             # how fast the plasma flows
+ROT_SPEED = 0.5               # steady rotation, radians/sec (0 = no spin)
+TWIST = 0.9                   # log-spiral: twist per e-fold of radius (0 = off)
+PALETTE_SPEED = 0.05          # how fast every tile's color drifts
 SATURATION = 0.9              # color richness (0 = gray, 1 = neon)
-TILE_JITTER = 0.09            # per-tile hue variation so neighbors differ
 GROUT = (0, 0, 0)             # color of the lines between tiles
 BG = (8, 8, 12)               # color outside the tiling
 
@@ -86,14 +84,6 @@ def build_hash(tiles):
             for gy in range(int(y0 // BUCKET), int(y1 // BUCKET) + 1):
                 grid.setdefault((gx, gy), []).append(idx)
     return grid
-
-
-def plasma(x, y, t):
-    v = (math.sin(x * 0.55 + t * FLOW_SPEED)
-         + math.sin(y * 0.48 - t * FLOW_SPEED * 0.8)
-         + math.sin((x + y) * 0.36 + t * FLOW_SPEED * 1.1)
-         + math.sin(math.hypot(x, y) * 0.42 - t * FLOW_SPEED))
-    return (v + 4.0) / 8.0
 
 
 def main():
@@ -197,28 +187,21 @@ def main():
             ehi = edges(idhi, W, H)
             elo = edges(idlo, W, H)
 
-            # flat plasma color per encountered tile
+            # one fixed, distinct color per tile: golden-ratio hue spacing so
+            # every hat clashes with its neighbors. Whole palette drifts slowly.
             colcache = {-1: BG}
+            drift = t * PALETTE_SPEED
             for grd in (idhi, idlo):
                 for row in grd:
                     for idx in row:
                         if idx not in colcache:
-                            tl = tiles[idx]
-                            v = plasma(tl["cx"], tl["cy"], t)
-                            # per-tile jitter so adjacent hats never blend
-                            jit = (idx * 0.61803398875) % 1.0 - 0.5
-                            vj = (idx * 0.7548776662) % 1.0
-                            if tl["r"]:  # reflected anti-hat -> contrasting glow
-                                hue = (v * 0.6 + t * PALETTE_SPEED + 0.5
-                                       + TILE_JITTER * jit) % 1.0
-                                colcache[idx] = hsv_to_rgb(hue, SATURATION,
-                                                           0.62 + 0.38 * v)
-                            else:
-                                hue = (v * 0.6 + t * PALETTE_SPEED
-                                       + TILE_JITTER * jit) % 1.0
+                            hue = (idx * 0.61803398875 + drift) % 1.0
+                            val = 0.60 + 0.40 * ((idx * 0.7548776662) % 1.0)
+                            if tiles[idx]["r"]:  # reflected anti-hat -> pale glow
                                 colcache[idx] = hsv_to_rgb(
-                                    hue, SATURATION,
-                                    (0.34 + 0.60 * v) * (0.85 + 0.15 * vj))
+                                    hue, SATURATION * 0.45, min(1.0, val + 0.25))
+                            else:
+                                colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
 
             gr0, gr1, gr2 = GROUT
             out = ["\033[H"]

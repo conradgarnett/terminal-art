@@ -5,7 +5,7 @@ Living, animated art pieces for your terminal. Pure Python standard library — 
 ## Pieces
 
 ### `hat.py`
-An **endless Droste log-spiral zoom** into a tiling of **"the hat"** — the aperiodic monotile discovered by Smith, Myers, Kaplan & Goodman-Strauss in 2023. It's a single 13-sided shape that tiles the plane but *never* repeats periodically. The view falls into the tiling forever, twisting into a logarithmic spiral that winds tighter toward the center, a vivid plasma field flowing across everything. Each hat is outlined so the shapes stay crisp; the reflected "anti-hats" (the ~1-in-7 mirror-image tiles the tiling can't avoid) glow as contrasting accents.
+An **endless Droste log-spiral zoom** into a tiling of **"the hat"** — the aperiodic monotile discovered by Smith, Myers, Kaplan & Goodman-Strauss in 2023. It's a single 13-sided shape that tiles the plane but *never* repeats periodically. The view pulls outward forever, twisting into a logarithmic spiral. Every hat gets its own fixed distinct color (golden-ratio hue spacing, so neighbors always clash) with a black outline, and the whole palette drifts slowly; the reflected "anti-hats" (the ~1-in-7 mirror-image tiles the tiling can't avoid) show as pale accents.
 
 ```bash
 python3 hat.py
@@ -24,9 +24,7 @@ The tiling geometry lives in `hat_tiling.json` (1,156 hats, baked offline from C
 | `ZOOM_DIR` | `1` = fall inward, `-1` = pull outward |
 | `ROT_SPEED` | steady rotation on top of the spiral (radians/sec) |
 | `UNITS_ACROSS` | base zoom — lower shows fewer, bigger hats |
-| `TILE_JITTER` | per-tile hue variation so neighbors stay distinct |
-| `FLOW_SPEED` | how fast the plasma flows |
-| `PALETTE_SPEED` | how fast the colors cycle |
+| `PALETTE_SPEED` | how fast the whole palette drifts |
 | `SATURATION` | color richness |
 | `GROUT` | color of the lines between tiles |
 
