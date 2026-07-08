@@ -33,7 +33,6 @@ ROT_SPEED = 0.4               # spin speed, radians/sec
 TWIST = 0.0                   # log-spiral swirl on top of the spin (0 = rigid)
 PALETTE_SPEED = 0.05          # how fast every tile's color drifts
 SATURATION = 0.9              # color richness (0 = gray, 1 = neon)
-GROUT = (0, 0, 0)             # color of the lines between tiles
 BG = (8, 8, 12)               # color outside the tiling
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -200,24 +199,6 @@ def main():
                         break
         return out
 
-    def edges(idg, W, H):
-        e = [[0] * W for _ in range(H)]
-        for row in range(H):
-            ir = idg[row]
-            up = idg[row - 1] if row > 0 else None
-            dn = idg[row + 1] if row + 1 < H else None
-            er = e[row]
-            for col in range(W):
-                me = ir[col]
-                if me == -1:
-                    continue
-                if (col + 1 < W and ir[col + 1] != me) or \
-                   (col > 0 and ir[col - 1] != me) or \
-                   (up is not None and up[col] != me) or \
-                   (dn is not None and dn[col] != me):
-                    er[col] = 1
-        return e
-
     frame = 0
     size = None
     PX = PY = None
@@ -236,7 +217,6 @@ def main():
             s0 = W / UNITS_ACROSS
             C = -theta + TWIST * math.log(s0)
             idg = id_grid(PX, PY, math.cos(C), math.sin(C), 1.0 / s0, W, H)
-            eg = edges(idg, W, H)
 
             # color by ML cluster: tiles sharing a local motif share a color,
             # so the coloring exposes the tiling's recurring local structure.
@@ -249,11 +229,9 @@ def main():
             last = None
             for row in range(H):
                 ig = idg[row]
-                eb = eg[row]
                 for col in range(W):
                     idx = ig[col]
-                    rgb = GROUT if eb[col] else (BG if idx < 0
-                                                 else kcolor[KT[idx]])
+                    rgb = BG if idx < 0 else kcolor[KT[idx]]
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
