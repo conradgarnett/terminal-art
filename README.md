@@ -11,7 +11,9 @@ A slowly **spinning** tiling of **"the spectre"** — the aperiodic monotile dis
 python3 hat.py
 ```
 
-**Color comes from machine learning.** An aperiodic tiling never repeats globally, yet it has only *finitely many* distinct local neighborhoods. So offline we fingerprint each tile's surroundings (rotation-invariant: neighbor positions rotated into the tile's own frame) and **k-means cluster** them into recurring "local motifs." Tiles that sit in the same kind of local configuration get the same color — so the palette exposes hidden structure in a pattern that, by construction, never repeats. The cluster labels are baked into `spectre_tiling.json` (from a level-4 patch of Craig Kaplan's substitution system), so the renderer itself stays pure standard library.
+Every tile gets its **own distinct color** (golden-ratio hue spacing, so adjacent shapes always clash). There are no outlines — they read as grey at this scale — so the color changes themselves mark the tile edges, and each spectre reads on its own.
+
+The tiling geometry lives in `spectre_tiling.json`, baked offline from a level-4 patch of Craig Kaplan's substitution system. The bake step (`bake_spectre.py`) also runs a small **machine-learning** pass: it fingerprints each tile's local neighborhood (rotation-invariant) and **k-means clusters** them into the tiling's recurring "local motifs," storing a cluster label per tile. Those labels ship in the data as an alternate way to color the piece (motif-class instead of per-tile), even though the default coloring is one hue per tile.
 
 The per-cell rotation geometry is precomputed once and the tile lookup uses a spatial hash plus a same-tile fast path, so it stays smooth (100+ fps) in pure Python even on large terminals.
 
@@ -22,10 +24,8 @@ The per-cell rotation geometry is precomputed once and the tile lookup uses a sp
 | `ROT_SPEED` | spin speed in radians/sec (negative to reverse) |
 | `TWIST` | log-spiral swirl on top of the spin (`0` = rigid spin) |
 | `UNITS_ACROSS` | scale — lower shows fewer, bigger tiles |
-| `PALETTE_SPEED` | how fast the cluster palette drifts |
+| `PALETTE_SPEED` | how fast the palette drifts |
 | `SATURATION` | color richness |
-
-There are no outlines (they read as grey at this scale); instead the ML cluster sets each tile's **hue** while each tile gets its own **brightness**, so neighboring spectres read as distinct stained-glass facets. The offline clustering script lives in `bake_spectre.py`.
 
 ### `plasma.py`
 A morphing truecolor plasma field built from layered sine waves, cycling through an HSV color wheel with brightness driving an ASCII intensity ramp.

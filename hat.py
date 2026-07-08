@@ -221,11 +221,10 @@ def main():
             C = -theta + TWIST * math.log(s0)
             idg = id_grid(PX, PY, math.cos(C), math.sin(C), 1.0 / s0, W, H)
 
-            # color by ML cluster (hue) so the palette exposes the tiling's
-            # recurring local motifs, but shade each tile individually so the
-            # spectre shapes stay visible without any grey outlines.
+            # every tile its own color: golden-ratio hue spacing so adjacent
+            # shapes always clash and each spectre reads on its own. No
+            # outlines (they went grey); the color changes mark the edges.
             drift = t * PALETTE_SPEED
-            khue = [(k / NCLUST + drift) % 1.0 for k in range(NCLUST)]
             colcache = {-1: BG}
 
             out = ["\033[H"]
@@ -236,8 +235,8 @@ def main():
                     idx = ig[col]
                     rgb = colcache.get(idx)
                     if rgb is None:
-                        rgb = hsv_to_rgb(khue[KT[idx]], SATURATION,
-                                         0.52 + 0.40 * VJIT[idx])
+                        hue = (idx * 0.61803398875 + drift) % 1.0
+                        rgb = hsv_to_rgb(hue, SATURATION, 0.62 + 0.33 * VJIT[idx])
                         colcache[idx] = rgb
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
@@ -246,8 +245,7 @@ def main():
                 out.append("\n")
                 last = None
             out.append("\033[0m\033[38;2;120;120;120m"
-                       "  the spectre · colored by ML-clustered local motifs "
-                       "· Ctrl-C to quit ")
+                       "  the spectre · a color per tile · Ctrl-C to quit ")
             sys.stdout.write("".join(out))
             sys.stdout.flush()
 
