@@ -41,13 +41,15 @@ BG = (8, 8, 12)               # color outside the tiling
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "hat_tiling.json")
-BUCKET = 4.0                  # spatial-hash cell size (~ one tile wide)
+BUCKET = 1.5                  # spatial-hash cell size (~ half a tile)
 
 # 4x4 ordered-dither thresholds: composite the two zoom octaves as a clean
 # stippled dissolve so each cell keeps a real tile's flat color (no muddy
 # blending, no doubled outlines).
 _B4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
 BAYER = [[(v + 0.5) / 16.0 for v in row] for row in _B4]
+BAYER_MIN = 0.5 / 16.0        # below this, no cell picks the small octave
+BAYER_MAX = 15.5 / 16.0       # above this, no cell picks the big octave
 
 
 def hsv_to_rgb(h, s, v):
@@ -95,6 +97,9 @@ def build_hash(tiles):
 def main():
     tiles = load_tiles()
     grid = build_hash(tiles)
+    # parallel lists for the hot loop -- list indexing beats dict lookups
+    BB = [t["bb"] for t in tiles]
+    PTS = [t["pts"] for t in tiles]
 
     sys.stdout.write("\033[?25l\033[?1049h")
 
@@ -106,38 +111,78 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    def id_grid(scale, theta, W, H, cx, cy):
-        """Which tile covers each cell, at a given scale + log-spiral twist."""
-        sy = scale * 0.5  # undistort ~2:1 character cells
+    def spiral_geometry(W, H):
+        """Per-cell log-spiral constants, rebuilt only when the size changes.
+
+        The world sample for a cell is  world = inv_scale * R(C) * (px, py),
+        where (px, py) folds in the cell's radius and its log-spiral twist and
+        depends only on the cell. That leaves the per-frame hot loop as plain
+        multiply-adds with no trig at all.
+        """
+        cx, cy = W / 2.0, H / 2.0
+        PX = [[0.0] * W for _ in range(H)]
+        PY = [[0.0] * W for _ in range(H)]
+        for row in range(H):
+            dy = -2.0 * (row + 0.5 - cy)  # undistort ~2:1 character cells
+            prx = PX[row]
+            pry = PY[row]
+            for col in range(W):
+                dx = col + 0.5 - cx
+                r = math.hypot(dx, dy)
+                if r < 1e-9:
+                    continue
+                phi = math.atan2(dy, dx) - TWIST * math.log(r)
+                prx[col] = r * math.cos(phi)
+                pry[col] = r * math.sin(phi)
+        return PX, PY
+
+    def id_grid(PX, PY, cosC, sinC, inv_scale, W, H):
+        """Which tile covers each cell, given the per-frame spiral rotation."""
         g = grid
-        tl = tiles
+        bb = BB
+        pts_all = PTS
         b = BUCKET
-        cos = math.cos
-        sin = math.sin
-        log = math.log
-        hyp = math.hypot
         floor = math.floor
         out = [[-1] * W for _ in range(H)]
         for row in range(H):
-            yr = -(row + 0.5 - cy) / sy
+            prx = PX[row]
+            pry = PY[row]
             orow = out[row]
+            prev = -1  # tile the previous cell landed in (spatial coherence)
             for col in range(W):
-                xr = (col + 0.5 - cx) / scale
-                # rotate by theta plus a twist that winds up toward the center
-                r = hyp(xr, yr)
-                ang = theta + TWIST * log(r if r > 1e-9 else 1e-9)
-                ca = cos(ang)
-                sa = sin(ang)
-                x = xr * ca + yr * sa
-                y = -xr * sa + yr * ca
+                px = prx[col]
+                py = pry[col]
+                x = (px * cosC - py * sinC) * inv_scale
+                y = (px * sinC + py * cosC) * inv_scale
+
+                # fast path: is this cell still inside the previous cell's tile?
+                if prev != -1:
+                    x0, x1, y0, y1 = bb[prev]
+                    if x0 <= x <= x1 and y0 <= y <= y1:
+                        pts = pts_all[prev]
+                        inside = False
+                        j = 12
+                        for i in range(13):
+                            xi, yi = pts[i]
+                            xj, yj = pts[j]
+                            if ((yi > y) != (yj > y)) and \
+                               (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
+                                inside = not inside
+                            j = i
+                        if inside:
+                            orow[col] = prev
+                            continue
+
                 bucket = g.get((int(floor(x / b)), int(floor(y / b))))
                 if not bucket:
+                    prev = -1
                     continue
+                prev = -1
                 for idx in bucket:
-                    x0, x1, y0, y1 = tl[idx]["bb"]
+                    x0, x1, y0, y1 = bb[idx]
                     if x < x0 or x > x1 or y < y0 or y > y1:
                         continue
-                    pts = tl[idx]["pts"]
+                    pts = pts_all[idx]
                     inside = False
                     j = 12
                     for i in range(13):
@@ -149,6 +194,7 @@ def main():
                         j = i
                     if inside:
                         orow[col] = idx
+                        prev = idx
                         break
         return out
 
@@ -171,12 +217,16 @@ def main():
         return e
 
     frame = 0
+    size = None
+    PX = PY = None
     try:
         while True:
             cols, rows = shutil.get_terminal_size((80, 24))
             H = rows - 1
             W = cols
-            cx, cy = W / 2.0, H / 2.0
+            if (W, H) != size:
+                size = (W, H)
+                PX, PY = spiral_geometry(W, H)
             t = frame * (1.0 / FPS)
             theta = ROT_SPEED * t
 
@@ -185,36 +235,51 @@ def main():
             f = z - math.floor(z)          # 0..1 within the octave
             s_hi = s0 * (2.0 ** f)         # big octave, fades out
             s_lo = s0 * (2.0 ** (f - 1))   # small octave, fades in
-            w_lo = f * f * (3.0 - 2.0 * f)  # smoothstep dissolve weight
+            # dissolve weight pinned to 0/1 outside a mid-octave band, so most
+            # frames only need to build one octave (see the skip below)
+            if f <= 0.35:
+                w_lo = 0.0
+            elif f >= 0.65:
+                w_lo = 1.0
+            else:
+                u = (f - 0.35) / 0.30
+                w_lo = u * u * (3.0 - 2.0 * u)
 
-            idhi = id_grid(s_hi, theta, W, H, cx, cy)
-            idlo = id_grid(s_lo, theta, W, H, cx, cy)
-            ehi = edges(idhi, W, H)
-            elo = edges(idlo, W, H)
+            # only build an octave if the dither actually shows any of it
+            idhi = ehi = idlo = elo = None
+            grds = []
+            if w_lo <= BAYER_MAX:
+                chi = -theta + TWIST * math.log(s_hi)
+                idhi = id_grid(PX, PY, math.cos(chi), math.sin(chi),
+                               1.0 / s_hi, W, H)
+                ehi = edges(idhi, W, H)
+                grds.append(idhi)
+            if w_lo > BAYER_MIN:
+                clo = -theta + TWIST * math.log(s_lo)
+                idlo = id_grid(PX, PY, math.cos(clo), math.sin(clo),
+                               1.0 / s_lo, W, H)
+                elo = edges(idlo, W, H)
+                grds.append(idlo)
 
             # one fixed, distinct color per tile: golden-ratio hue spacing so
             # every hat clashes with its neighbors. Whole palette drifts slowly.
             colcache = {-1: BG}
             drift = t * PALETTE_SPEED
-            for grd in (idhi, idlo):
+            for grd in grds:
                 for row in grd:
                     for idx in row:
                         if idx not in colcache:
                             hue = (idx * 0.61803398875 + drift) % 1.0
-                            val = 0.60 + 0.40 * ((idx * 0.7548776662) % 1.0)
-                            if tiles[idx]["r"]:  # reflected anti-hat -> pale glow
-                                colcache[idx] = hsv_to_rgb(
-                                    hue, SATURATION * 0.45, min(1.0, val + 0.25))
-                            else:
-                                colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
+                            val = 0.62 + 0.38 * ((idx * 0.7548776662) % 1.0)
+                            colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
 
             out = ["\033[H"]
             last = None
             for row in range(H):
-                ih = idhi[row]
-                il = idlo[row]
-                eh = ehi[row]
-                el = elo[row]
+                ih = idhi[row] if idhi else None
+                il = idlo[row] if idlo else None
+                eh = ehi[row] if ehi else None
+                el = elo[row] if elo else None
                 brow = BAYER[row & 3]
                 for col in range(W):
                     # pick exactly one octave for this cell -> flat, pure color
