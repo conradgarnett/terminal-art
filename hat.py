@@ -7,12 +7,12 @@ Strauss's 2023 aperiodic monotile — a single 14-sided shape that tiles
 the plane, never repeats, and needs no reflections, unlike its sibling
 "the hat") and turns it slowly in place like a colored-glass wheel.
 
-Color comes from machine learning: an aperiodic tiling has only finitely
-many distinct local neighborhoods, so offline we fingerprint each tile's
-surroundings (rotation-invariant) and k-means cluster them into recurring
-"local motifs". Tiles sharing a motif share a color, so the palette
-exposes hidden structure in a pattern that never repeats. The clustering
-is baked into spectre_tiling.json, so this renderer is pure stdlib.
+Every tile gets its own color (golden-ratio hue spacing so neighbors
+clash), with a thin rim in a darker shade of that color so each spectre
+reads as a crisp stained-glass facet. The geometry lives in
+spectre_tiling.json (baked offline, pure stdlib at runtime); that file
+also carries an ML-clustered "local motif" label per tile as an alternate
+coloring -- see bake_spectre.py.
 
 Run:   python3 hat.py
 Quit:  Ctrl-C
@@ -27,7 +27,7 @@ import sys
 import time
 
 # ---- knobs -----------------------------------------------------------------
-UNITS_ACROSS = 20.0           # world units across the width (lower = bigger tiles)
+UNITS_ACROSS = 16.0           # world units across the width (lower = bigger tiles)
 FPS = 24
 ROT_SPEED = 0.4               # spin speed, radians/sec
 TWIST = 0.0                   # log-spiral swirl on top of the spin (0 = rigid)
@@ -221,23 +221,35 @@ def main():
             C = -theta + TWIST * math.log(s0)
             idg = id_grid(PX, PY, math.cos(C), math.sin(C), 1.0 / s0, W, H)
 
-            # every tile its own color: golden-ratio hue spacing so adjacent
-            # shapes always clash and each spectre reads on its own. No
-            # outlines (they went grey); the color changes mark the edges.
+            # every tile its own color (golden-ratio hue, so neighbors clash),
+            # with a thin rim in a darker shade of that same color so each
+            # spectre reads as a crisp facet -- shapes without any grey.
             drift = t * PALETTE_SPEED
             colcache = {-1: BG}
+            dark = {-1: BG}
 
             out = ["\033[H"]
             last = None
             for row in range(H):
                 ig = idg[row]
+                nr = idg[row + 1] if row + 1 < H else None
                 for col in range(W):
                     idx = ig[col]
-                    rgb = colcache.get(idx)
-                    if rgb is None:
-                        hue = (idx * 0.61803398875 + drift) % 1.0
-                        rgb = hsv_to_rgb(hue, SATURATION, 0.62 + 0.33 * VJIT[idx])
-                        colcache[idx] = rgb
+                    if idx < 0:
+                        rgb = BG
+                    else:
+                        rgb = colcache.get(idx)
+                        if rgb is None:
+                            hue = (idx * 0.61803398875 + drift) % 1.0
+                            rgb = hsv_to_rgb(hue, SATURATION,
+                                             0.62 + 0.33 * VJIT[idx])
+                            colcache[idx] = rgb
+                            dark[idx] = (rgb[0] * 42 // 100,
+                                         rgb[1] * 42 // 100,
+                                         rgb[2] * 42 // 100)
+                        if (col + 1 < W and ig[col + 1] != idx) or \
+                           (nr is not None and nr[col] != idx):
+                            rgb = dark[idx]
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
