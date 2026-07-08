@@ -5,7 +5,7 @@ Living, animated art pieces for your terminal. Pure Python standard library — 
 ## Pieces
 
 ### `hat.py`
-An **endless Droste log-spiral zoom** into a tiling of **"the hat"** — the aperiodic monotile discovered by Smith, Myers, Kaplan & Goodman-Strauss in 2023. It's a single 13-sided shape that tiles the plane but *never* repeats periodically. The view pulls outward forever, twisting into a logarithmic spiral. Every hat gets its own fixed distinct color (golden-ratio hue spacing, so neighbors always clash) with a black outline, and the whole palette drifts slowly.
+An **endless Droste log-spiral zoom** into a tiling of **"the spectre"** — the aperiodic monotile discovered by Smith, Myers, Kaplan & Goodman-Strauss in 2023. It's a single 14-sided shape that tiles the plane, *never* repeats periodically, and — unlike its sibling "the hat" — needs **no reflections**, making it a true "einstein" (one stone). The view pulls outward forever, twisting into a logarithmic spiral. Every tile gets its own fixed distinct color (golden-ratio hue spacing, so neighbors always clash) with a black outline, and the whole palette drifts slowly.
 
 The per-cell spiral geometry is precomputed once and the tile lookup uses a spatial hash plus a same-tile fast path, so it stays smooth (tens of fps) in pure Python even on large terminals.
 

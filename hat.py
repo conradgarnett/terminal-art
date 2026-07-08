@@ -2,10 +2,11 @@
 """
 hat.py — the aperiodic monotile, in an endless Droste zoom.
 
-Renders a tiling of "the hat" (Smith, Myers, Kaplan & Goodman-Strauss's
-2023 aperiodic monotile — a single 13-sided shape that tiles the plane
-but never repeats periodically) and falls into it forever: a seamless
-infinite zoom with a slow rotation, like an Escher staircase for tiles.
+Renders a tiling of "the spectre" (Smith, Myers, Kaplan & Goodman-
+Strauss's 2023 aperiodic monotile — a single 14-sided shape that tiles
+the plane, never repeats, and needs no reflections, unlike its sibling
+"the hat") and falls into it forever: a seamless infinite zoom with a
+slow rotation, like an Escher staircase for tiles.
 
 The illusion: the tiling is drawn at two zoom levels one octave apart and
 crossfaded. As the big octave grows too large and fades out, the small
@@ -40,7 +41,7 @@ GROUT = (0, 0, 0)             # color of the lines between tiles
 BG = (8, 8, 12)               # color outside the tiling
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "hat_tiling.json")
+                         "spectre_tiling.json")
 BUCKET = 1.5                  # spatial-hash cell size (~ half a tile)
 
 # 4x4 ordered-dither thresholds: composite the two zoom octaves as a clean
@@ -160,9 +161,10 @@ def main():
                     x0, x1, y0, y1 = bb[prev]
                     if x0 <= x <= x1 and y0 <= y <= y1:
                         pts = pts_all[prev]
+                        n = len(pts)
                         inside = False
-                        j = 12
-                        for i in range(13):
+                        j = n - 1
+                        for i in range(n):
                             xi, yi = pts[i]
                             xj, yj = pts[j]
                             if ((yi > y) != (yj > y)) and \
@@ -183,9 +185,10 @@ def main():
                     if x < x0 or x > x1 or y < y0 or y > y1:
                         continue
                     pts = pts_all[idx]
+                    n = len(pts)
                     inside = False
-                    j = 12
-                    for i in range(13):
+                    j = n - 1
+                    for i in range(n):
                         xi, yi = pts[i]
                         xj, yj = pts[j]
                         if ((yi > y) != (yj > y)) and \
@@ -303,7 +306,7 @@ def main():
                 out.append("\n")
                 last = None
             out.append("\033[0m\033[38;2;120;120;120m"
-                       "  the hat · infinite zoom · Ctrl-C to quit ")
+                       "  the spectre · infinite zoom · Ctrl-C to quit ")
             sys.stdout.write("".join(out))
             sys.stdout.flush()
 
