@@ -10,7 +10,9 @@ in the caustics. A sunrise over the sea:
   * the sun          — chord caustics of a circle (k-th segment joins the
                        points at angles θ and mθ), layered and colour-graded
   * its reflection   — the same segments mirrored and rippled on the water
-  * the sea          — stacked interfering wave-segment families
+  * the sea          — streamlines of a domain-warped flow field: sines are
+                       nested inside sines until the sinusoids are unreadable
+                       and only turbulent current remains
   * the birds        — small twin-arc segment fans
 """
 
@@ -33,7 +35,8 @@ SHAL = np.array([0.40, 0.58, 0.71])
 GOLD = np.array([0.96, 0.66, 0.11])
 
 
-def sun_caustic(center, R, n=4200, mults=((6, 0.0), (11, 0.35), (18, 0.9))):
+def sun_caustic(center, R, n=5200,
+                mults=((6, 0.0), (11, 0.35), (18, 0.9), (29, 1.55))):
     """Chord caustics: segment k joins the circle points at angle θ and mθ."""
     k = np.arange(1, n + 1)
     th = 2 * np.pi * k / n
@@ -67,30 +70,49 @@ def reflect(segs, horizon):
     return s[keep]
 
 
-def sea(ax, horizon, sun_x, x0=-2.35, x1=2.35, rows=200, samples=620):
-    x = np.linspace(x0, x1, samples)
-    blue_segs, blue_cols, gold_segs = [], [], []
-    for i in range(rows):
-        u = i / (rows - 1)
-        y0 = horizon - (0.012 + 1.75 * u ** 1.5)
-        amp = 0.004 + 0.058 * u
-        wl = 0.15 + 1.05 * u
-        ph = 2.6 * i
-        y = (y0 + amp * np.sin(2 * np.pi * x / wl + ph)
-             + 0.45 * amp * np.sin(2 * np.pi * x / (wl * 0.5) + 1.7 * ph)
-             + 0.2 * amp * np.sin(2 * np.pi * x / (wl * 0.27) + 0.6 * ph))
-        pts = np.stack([x, y], 1)
-        seg = np.stack([pts[:-1], pts[1:]], 1)
-        mid = 0.5 * (x[:-1] + x[1:])
-        gold_mask = np.abs(mid - sun_x) < (0.045 + 0.4 * u)
-        gold_segs.append(seg[gold_mask])
-        blue_segs.append(seg[~gold_mask])
-        col = DEEP * u + SHAL * (1 - u)
-        blue_cols.append(np.tile(col, ((~gold_mask).sum(), 1)))
-    ax.add_collection(LineCollection(np.concatenate(blue_segs),
-                      colors=np.concatenate(blue_cols), linewidths=0.7, alpha=0.85))
-    ax.add_collection(LineCollection(np.concatenate(gold_segs),
-                      colors=GOLD, linewidths=0.85, alpha=0.5))
+def field_angle(x, y):
+    """A flow direction built by domain warping: sines nested inside sines,
+    so the result is turbulent and the underlying sinusoids are unreadable."""
+    p0, p1 = x * 1.5, y * 2.4 + 1.0
+    q0 = np.sin(p0 * 1.3 + 1.7 * np.sin(p1 * 0.7))
+    q1 = np.sin(p1 * 1.1 + 1.9 * np.sin(p0 * 0.6))
+    a = (0.9 * np.sin(1.2 * p0 + 2.0 * q0)
+         + 0.7 * np.sin(1.7 * p1 - 1.5 * q1 + 0.5)
+         + 0.5 * np.sin(2.3 * (p0 + q1) + 1.1))
+    return 0.6 * a
+
+
+def water(ax, horizon, sun_x, bottom=-1.72, S=1700, T=24, step=0.021):
+    rng = np.random.default_rng(5)
+    sx = rng.uniform(-2.42, 2.42, S)
+    sy = horizon - (0.002 + (horizon - bottom) * rng.uniform(0, 1, S) ** 1.7)
+    p = np.stack([sx, sy], 1)
+    fwd, bwd = [p.copy()], []
+    q = p.copy()
+    for _ in range(T):
+        a = field_angle(q[:, 0], q[:, 1])
+        q = q + step * np.stack([np.cos(a), np.sin(a) * 0.5], 1)  # flatten -> surface
+        fwd.append(q.copy())
+    q = p.copy()
+    for _ in range(T):
+        a = field_angle(q[:, 0], q[:, 1])
+        q = q - step * np.stack([np.cos(a), np.sin(a) * 0.5], 1)
+        bwd.append(q.copy())
+    arr = np.stack(bwd[::-1] + fwd, 0)                       # (L, S, 2)
+    L = arr.shape[0]
+
+    my = arr[:, :, 1].mean(0)
+    mx = arr[:, :, 0].mean(0)
+    d = np.clip((horizon - my) / (horizon - bottom), 0, 1)
+    col = SHAL[None] * (1 - d[:, None]) + DEEP[None] * d[:, None]
+    col[np.abs(mx - sun_x) < (0.06 + 0.42 * d)] = GOLD
+
+    segs = np.stack([arr[:-1].reshape(-1, 2), arr[1:].reshape(-1, 2)], 1)
+    seg_col = np.tile(col, (L - 1, 1))
+    keep = ((segs[:, :, 1] >= bottom) & (segs[:, :, 1] <= horizon)
+            & (np.abs(segs[:, :, 0]) <= 2.42)).all(1)
+    ax.add_collection(LineCollection(segs[keep], colors=seg_col[keep],
+                                     linewidths=0.6, alpha=0.7))
 
 
 def birds(ax, n=22):
@@ -126,14 +148,14 @@ def main():
                       colors=GOLD, linewidths=0.25, alpha=0.08, zorder=1))
     ax.add_collection(LineCollection(corona(sun_c, 0.64, spike=0.14),
                       colors=GOLD, linewidths=0.5, alpha=0.05, zorder=2))
-    sea(ax, horizon, sun_c[0])
+    water(ax, horizon, sun_c[0])
     lc = LineCollection(segs, array=idx, cmap=WARM, linewidths=0.3, alpha=0.32, zorder=6)
     ax.add_collection(lc)
     birds(ax)
 
     cap = (r"segment $k$ joins two points of a circle:$\quad$"
            r"$P(k)=C+R(\cos\theta,\sin\theta),\ \ Q(k)=C+R(\cos m\theta,\sin m\theta),"
-           r"\ \ \theta=\frac{2\pi k}{N},\ \ m\in\{6,11,18\}$")
+           r"\ \ \theta=\frac{2\pi k}{N},\ \ m\in\{6,11,18,29\}$")
     fig.text(0.5, 0.055, "MADE ONLY OF LINE SEGMENTS", ha="center", va="center",
              color=GOLD, fontsize=11, fontweight="bold")
     fig.text(0.5, 0.022, cap, ha="center", va="center", color="#3a3a3a", fontsize=11.5)

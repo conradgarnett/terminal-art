@@ -13,9 +13,10 @@ Three families make the scene:
 - **Sun** — segment `k` joins the center `C` to a point on a spiked circle,
   `P(k) = C + R₀(1 + 0.09·sin12θ)(cosθ, sinθ)`, `θ = 2πk/N`. The segments
   crowd near `C` into a bright disc and fan outward into a soft corona.
-- **Sea** — stacked families of wave segments (sums of sines), spaced non-linearly
-  for perspective. The segments beneath the sun are drawn gold, tracing its
-  shimmering reflection down the water.
+- **Sea** — streamlines of a **domain-warped flow field**: the flow direction is
+  `sin(… sin(… sin(…)))`, sines nested inside sines, until the sinusoids are
+  unreadable and only turbulent current remains. Segments beneath the sun are
+  gold, tracing its shimmering reflection.
 - **Birds** — small twin-arc segment fans, `y ∝ |sin πt|`.
 
 ```bash
