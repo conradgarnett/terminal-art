@@ -24,7 +24,7 @@ import sys
 import time
 
 # ---- knobs -----------------------------------------------------------------
-UNITS_ACROSS = 12.0           # world units across the width (lower = bigger tiles)
+UNITS_ACROSS = 16.0           # world units across the width (lower = bigger tiles)
 FPS = 24
 ROT_SPEED = 0.4               # spin speed, radians/sec
 TWIST = 0.0                   # log-spiral swirl on top of the spin (0 = rigid)
