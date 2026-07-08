@@ -5,11 +5,14 @@ hat.py — the aperiodic monotile, slowly spinning.
 Renders a tiling of "the spectre" (Smith, Myers, Kaplan & Goodman-
 Strauss's 2023 aperiodic monotile — a single 14-sided shape that tiles
 the plane, never repeats, and needs no reflections, unlike its sibling
-"the hat") and turns it slowly in place like a colored-glass wheel. Every
-tile keeps its own distinct color; the whole palette drifts as it spins.
+"the hat") and turns it slowly in place like a colored-glass wheel.
 
-The tiling geometry lives in spectre_tiling.json (baked offline from
-Craig Kaplan's substitution system) so this renderer is pure stdlib.
+Color comes from machine learning: an aperiodic tiling has only finitely
+many distinct local neighborhoods, so offline we fingerprint each tile's
+surroundings (rotation-invariant) and k-means cluster them into recurring
+"local motifs". Tiles sharing a motif share a color, so the palette
+exposes hidden structure in a pattern that never repeats. The clustering
+is baked into spectre_tiling.json, so this renderer is pure stdlib.
 
 Run:   python3 hat.py
 Quit:  Ctrl-C
@@ -55,7 +58,9 @@ def hsv_to_rgb(h, s, v):
 def load_tiles():
     with open(DATA_FILE) as fh:
         data = json.load(fh)
-    raw = [[(float(x), float(y)) for x, y in t["p"]] for t in data["tiles"]]
+    nclust = data.get("nclust", 1)
+    src = data["tiles"]
+    raw = [[(float(x), float(y)) for x, y in t["p"]] for t in src]
     # recenter the whole patch on the origin, which is the spin center --
     # otherwise the view sits off to one edge and half the screen is empty
     minx = min(p[0] for pts in raw for p in pts)
@@ -64,7 +69,7 @@ def load_tiles():
     maxy = max(p[1] for pts in raw for p in pts)
     ox, oy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
     tiles = []
-    for pts0 in raw:
+    for t, pts0 in zip(src, raw):
         pts = [(x - ox, y - oy) for x, y in pts0]
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
@@ -73,8 +78,9 @@ def load_tiles():
             "cx": sum(xs) / len(xs),
             "cy": sum(ys) / len(ys),
             "bb": (min(xs), max(xs), min(ys), max(ys)),
+            "k": t.get("k", 0),  # ML cluster: which local motif this tile is
         })
-    return tiles
+    return tiles, nclust
 
 
 def build_hash(tiles):
@@ -88,11 +94,12 @@ def build_hash(tiles):
 
 
 def main():
-    tiles = load_tiles()
+    tiles, NCLUST = load_tiles()
     grid = build_hash(tiles)
     # parallel lists for the hot loop -- list indexing beats dict lookups
     BB = [t["bb"] for t in tiles]
     PTS = [t["pts"] for t in tiles]
+    KT = [t["k"] for t in tiles]  # ML cluster label per tile
 
     sys.stdout.write("\033[?25l\033[?1049h")
 
@@ -231,16 +238,12 @@ def main():
             idg = id_grid(PX, PY, math.cos(C), math.sin(C), 1.0 / s0, W, H)
             eg = edges(idg, W, H)
 
-            # one fixed, distinct color per tile: golden-ratio hue spacing so
-            # every tile clashes with its neighbors. Whole palette drifts slowly.
-            colcache = {-1: BG}
+            # color by ML cluster: tiles sharing a local motif share a color,
+            # so the coloring exposes the tiling's recurring local structure.
+            # Deep palette (val capped) so nothing reads as washed-out white.
             drift = t * PALETTE_SPEED
-            for row in idg:
-                for idx in row:
-                    if idx not in colcache:
-                        hue = (idx * 0.61803398875 + drift) % 1.0
-                        val = 0.62 + 0.38 * ((idx * 0.7548776662) % 1.0)
-                        colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
+            kcolor = [hsv_to_rgb((k / NCLUST + drift) % 1.0, SATURATION, 0.80)
+                      for k in range(NCLUST)]
 
             out = ["\033[H"]
             last = None
@@ -248,7 +251,9 @@ def main():
                 ig = idg[row]
                 eb = eg[row]
                 for col in range(W):
-                    rgb = GROUT if eb[col] else colcache[ig[col]]
+                    idx = ig[col]
+                    rgb = GROUT if eb[col] else (BG if idx < 0
+                                                 else kcolor[KT[idx]])
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
@@ -256,7 +261,8 @@ def main():
                 out.append("\n")
                 last = None
             out.append("\033[0m\033[38;2;120;120;120m"
-                       "  the spectre · spinning · Ctrl-C to quit ")
+                       "  the spectre · colored by ML-clustered local motifs "
+                       "· Ctrl-C to quit ")
             sys.stdout.write("".join(out))
             sys.stdout.flush()
 
