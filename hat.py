@@ -28,16 +28,18 @@ import sys
 import time
 
 # ---- knobs -----------------------------------------------------------------
-UNITS_ACROSS = 16.0           # world units across the width at the base zoom
+UNITS_ACROSS = 12.0           # world units across the width at the base zoom
 FPS = 24
 ZOOM_PERIOD = 6.0             # seconds to zoom in by one octave (2x)
 ZOOM_DIR = 1                  # 1 = fall inward, -1 = pull outward
-ROT_SPEED = 0.12              # rotation, radians/sec (0 = no spin)
+ROT_SPEED = 0.10              # steady rotation, radians/sec (0 = no spin)
+TWIST = 0.6                   # log-spiral: twist per e-fold of radius (0 = off)
 PALETTE_SPEED = 0.06          # how fast the colors cycle
 FLOW_SPEED = 0.6             # how fast the plasma flows
-SATURATION = 0.85             # color richness (0 = gray, 1 = neon)
-GROUT = (24, 24, 30)          # color of the lines between tiles
-BG = (10, 10, 14)             # color outside the tiling
+SATURATION = 0.9              # color richness (0 = gray, 1 = neon)
+TILE_JITTER = 0.09            # per-tile hue variation so neighbors differ
+GROUT = (0, 0, 0)             # color of the lines between tiles
+BG = (8, 8, 12)               # color outside the tiling
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "hat_tiling.json")
@@ -87,10 +89,10 @@ def build_hash(tiles):
 
 
 def plasma(x, y, t):
-    v = (math.sin(x * 0.35 + t * FLOW_SPEED)
-         + math.sin(y * 0.30 - t * FLOW_SPEED * 0.8)
-         + math.sin((x + y) * 0.22 + t * FLOW_SPEED * 1.1)
-         + math.sin(math.hypot(x, y) * 0.30 - t * FLOW_SPEED))
+    v = (math.sin(x * 0.55 + t * FLOW_SPEED)
+         + math.sin(y * 0.48 - t * FLOW_SPEED * 0.8)
+         + math.sin((x + y) * 0.36 + t * FLOW_SPEED * 1.1)
+         + math.sin(math.hypot(x, y) * 0.42 - t * FLOW_SPEED))
     return (v + 4.0) / 8.0
 
 
@@ -109,25 +111,30 @@ def main():
     signal.signal(signal.SIGTERM, cleanup)
 
     def id_grid(scale, theta, W, H, cx, cy):
-        """Which tile covers each cell, at a given scale + rotation."""
-        ct = math.cos(theta)
-        st = math.sin(theta)
+        """Which tile covers each cell, at a given scale + log-spiral twist."""
         sy = scale * 0.5  # undistort ~2:1 character cells
         g = grid
         tl = tiles
         b = BUCKET
+        cos = math.cos
+        sin = math.sin
+        log = math.log
+        hyp = math.hypot
+        floor = math.floor
         out = [[-1] * W for _ in range(H)]
         for row in range(H):
             yr = -(row + 0.5 - cy) / sy
-            yst = yr * st
-            yct = yr * ct
             orow = out[row]
             for col in range(W):
                 xr = (col + 0.5 - cx) / scale
-                x = xr * ct + yst
-                y = -xr * st + yct
-                bucket = g.get((int(x // b) if x >= 0 else int(math.floor(x / b)),
-                                int(y // b) if y >= 0 else int(math.floor(y / b))))
+                # rotate by theta plus a twist that winds up toward the center
+                r = hyp(xr, yr)
+                ang = theta + TWIST * log(r if r > 1e-9 else 1e-9)
+                ca = cos(ang)
+                sa = sin(ang)
+                x = xr * ca + yr * sa
+                y = -xr * sa + yr * ca
+                bucket = g.get((int(floor(x / b)), int(floor(y / b))))
                 if not bucket:
                     continue
                 for idx in bucket:
@@ -153,14 +160,17 @@ def main():
         e = [[0] * W for _ in range(H)]
         for row in range(H):
             ir = idg[row]
-            inx = idg[row + 1] if row + 1 < H else None
+            up = idg[row - 1] if row > 0 else None
+            dn = idg[row + 1] if row + 1 < H else None
             er = e[row]
             for col in range(W):
                 me = ir[col]
                 if me == -1:
                     continue
                 if (col + 1 < W and ir[col + 1] != me) or \
-                   (inx is not None and inx[col] != me):
+                   (col > 0 and ir[col - 1] != me) or \
+                   (up is not None and up[col] != me) or \
+                   (dn is not None and dn[col] != me):
                     er[col] = 1
         return e
 
@@ -195,14 +205,20 @@ def main():
                         if idx not in colcache:
                             tl = tiles[idx]
                             v = plasma(tl["cx"], tl["cy"], t)
+                            # per-tile jitter so adjacent hats never blend
+                            jit = (idx * 0.61803398875) % 1.0 - 0.5
+                            vj = (idx * 0.7548776662) % 1.0
                             if tl["r"]:  # reflected anti-hat -> contrasting glow
-                                hue = (v * 0.6 + t * PALETTE_SPEED + 0.5) % 1.0
+                                hue = (v * 0.6 + t * PALETTE_SPEED + 0.5
+                                       + TILE_JITTER * jit) % 1.0
                                 colcache[idx] = hsv_to_rgb(hue, SATURATION,
-                                                           0.55 + 0.45 * v)
+                                                           0.62 + 0.38 * v)
                             else:
-                                hue = (v * 0.6 + t * PALETTE_SPEED) % 1.0
-                                colcache[idx] = hsv_to_rgb(hue, SATURATION,
-                                                           0.30 + 0.60 * v)
+                                hue = (v * 0.6 + t * PALETTE_SPEED
+                                       + TILE_JITTER * jit) % 1.0
+                                colcache[idx] = hsv_to_rgb(
+                                    hue, SATURATION,
+                                    (0.34 + 0.60 * v) * (0.85 + 0.15 * vj))
 
             gr0, gr1, gr2 = GROUT
             out = ["\033[H"]
