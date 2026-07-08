@@ -19,18 +19,8 @@ import time
 # ---- rendering knobs -------------------------------------------------------
 CHARS = " .:-=+*#%@"          # low -> high intensity ramp
 FPS = 30
-PALETTE_SPEED = 0.02          # how fast the base hue drifts (slow = calm)
-FLOW_SPEED = 0.4             # how fast the plasma churns
-
-# --- color feel ---
-# Colors stay inside a gentle band around a slowly drifting base hue,
-# with soft saturation and a lifted brightness floor so nothing flickers
-# harshly. Widen HUE_SPAN or raise SATURATION for a more vivid look.
-HUE_BASE = 0.58               # starting hue (0.58 ≈ soft blue)
-HUE_SPAN = 0.20               # how far the hue wanders (full wheel = 1.0)
-SATURATION = 0.45             # 0 = grayscale, 1 = neon
-VALUE_FLOOR = 0.45            # brightness of the darkest cells
-VALUE_RANGE = 0.45            # extra brightness at the brightest cells
+PALETTE_SPEED = 0.15          # how fast the colors cycle
+FLOW_SPEED = 0.9             # how fast the plasma churns
 
 
 def hsv_to_rgb(h, s, v):
@@ -85,9 +75,8 @@ def main():
                     v = (v + 4.0) / 8.0            # -> 0..1
                     ch = CHARS[min(len(CHARS) - 1,
                                    int(v * (len(CHARS) - 1) + 0.5))]
-                    hue = (HUE_BASE + t * PALETTE_SPEED + v * HUE_SPAN) % 1.0
-                    r, g, b = hsv_to_rgb(
-                        hue, SATURATION, VALUE_FLOOR + VALUE_RANGE * v)
+                    hue = (v * 0.6 + t * PALETTE_SPEED) % 1.0
+                    r, g, b = hsv_to_rgb(hue, 0.85, 0.35 + 0.65 * v)
                     out.append(f"\033[38;2;{r};{g};{b}m{ch}")
                 out.append("\n")
 
