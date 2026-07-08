@@ -230,19 +230,25 @@ def main():
             t = frame * (1.0 / FPS)
             theta = ROT_SPEED * t
 
+            # Two zoom layers staggered by HALF an octave so their resets never
+            # coincide: whichever layer is mid-zoom stays visible while the other
+            # resets out of sight. This is what makes the loop truly seamless --
+            # no jump-back when it zooms all the way out.
             s0 = W / UNITS_ACROSS
-            z = (t / ZOOM_PERIOD) * ZOOM_DIR
-            f = z - math.floor(z)          # 0..1 within the octave
-            s_hi = s0 * (2.0 ** f)         # big octave, fades out
-            s_lo = s0 * (2.0 ** (f - 1))   # small octave, fades in
-            # dissolve weight pinned to 0/1 outside a mid-octave band, so most
-            # frames only need to build one octave (see the skip below)
-            if f <= 0.35:
+            L = t / ZOOM_PERIOD
+            pa = L - math.floor(L)             # layer A phase
+            pb = (L + 0.5) - math.floor(L + 0.5)  # layer B phase (offset 0.5)
+            s_hi = s0 * (2.0 ** (ZOOM_DIR * pa))
+            s_lo = s0 * (2.0 ** (ZOOM_DIR * pb))
+            # show the layer that's furthest from its reset (phase near 0/1);
+            # a flat band keeps most frames on a single layer for speed
+            m = 2.0 * min(pb, 1.0 - pb)
+            if m <= 0.35:
                 w_lo = 0.0
-            elif f >= 0.65:
+            elif m >= 0.65:
                 w_lo = 1.0
             else:
-                u = (f - 0.35) / 0.30
+                u = (m - 0.35) / 0.30
                 w_lo = u * u * (3.0 - 2.0 * u)
 
             # only build an octave if the dither actually shows any of it
