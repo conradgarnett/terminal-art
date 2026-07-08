@@ -31,8 +31,8 @@ import time
 UNITS_ACROSS = 12.0           # world units across the width at the base zoom
 FPS = 24
 ZOOM_PERIOD = 6.0             # seconds to zoom in by one octave (2x)
-ZOOM_DIR = 1                  # 1 = fall inward, -1 = pull outward
-ROT_SPEED = 0.10              # steady rotation, radians/sec (0 = no spin)
+ZOOM_DIR = -1                 # 1 = fall inward, -1 = pull outward
+ROT_SPEED = 0.16              # steady rotation, radians/sec (0 = no spin)
 TWIST = 0.6                   # log-spiral: twist per e-fold of radius (0 = off)
 PALETTE_SPEED = 0.06          # how fast the colors cycle
 FLOW_SPEED = 0.6             # how fast the plasma flows
