@@ -26,15 +26,14 @@ import sys
 import time
 
 # ---- composition -----------------------------------------------------------
-UNITS_ACROSS = 22.0           # world units across the width (lower = bigger shapes)
+UNITS_ACROSS = 15.0           # world units across the width (lower = bigger shapes)
 FPS = 20
 SPEED = 1.0                   # overall tempo of the color drift
-PAPER_LEVEL = 0.50            # fraction of the field left as bare paper
+PAPER_LEVEL = 0.48            # fraction of the field left as bare paper
 INK_LEVEL = 0.86             # above this a shape goes near-black for weight
 
 PAPER = (234, 228, 214)       # warm off-white ground
-INK = (38, 35, 42)           # near-black
-GROUT = (196, 189, 173)       # quiet line between tiles (a shade under paper)
+INK = (33, 31, 36)           # near-black outline / weight
 ACCENTS = [                   # Bauhaus primaries
     (211, 83, 61),            # vermilion red
     (233, 171, 76),           # ochre yellow
@@ -76,7 +75,7 @@ def point_in_poly(px, py, pts):
 
 
 def build_map(tiles, W, H):
-    """Assign each cell to a tile, once. Returns (cellmap, edge)."""
+    """Assign each cell to a tile, once. Returns cellmap (tile index per cell)."""
     wcx = sum(t["cx"] for t in tiles) / len(tiles)
     wcy = sum(t["cy"] for t in tiles) / len(tiles)
     sx = W / UNITS_ACROSS
@@ -102,21 +101,7 @@ def build_map(tiles, W, H):
             for col in range(minx, maxx + 1):
                 if crow[col] == -1 and point_in_poly(col + 0.5, py, spts):
                     crow[col] = idx
-
-    # single-width line where a cell's right/down neighbour is another tile
-    edge = [[False] * W for _ in range(H)]
-    for row in range(H):
-        cr = cellmap[row]
-        nr = cellmap[row + 1] if row + 1 < H else None
-        er = edge[row]
-        for col in range(W):
-            me = cr[col]
-            if me == -1:
-                continue
-            if (col + 1 < W and cr[col + 1] != me) or \
-               (nr is not None and nr[col] != me):
-                er[col] = True
-    return cellmap, edge
+    return cellmap
 
 
 def tile_color(cx, cy, t):
@@ -150,7 +135,7 @@ def main():
     signal.signal(signal.SIGTERM, cleanup)
 
     size = None
-    cellmap = edge = None
+    cellmap = None
     frame = 0
     try:
         while True:
@@ -159,32 +144,43 @@ def main():
             W = cols
             if (W, H) != size:
                 size = (W, H)
-                cellmap, edge = build_map(tiles, W, H)
+                cellmap = build_map(tiles, W, H)
             t = frame * (SPEED / FPS)
 
+            # colour of each tile this frame (flat fields)
             colc = {-1: PAPER}
+            for cr in cellmap:
+                for idx in cr:
+                    if idx not in colc:
+                        tl = tiles[idx]
+                        colc[idx] = tile_color(tl["cx"], tl["cy"], t)
+
             out = ["\033[H"]
             last = None
             for row in range(H):
                 cr = cellmap[row]
-                er = edge[row]
+                nr = cellmap[row + 1] if row + 1 < H else None
                 for col in range(W):
                     idx = cr[col]
-                    if er[col]:
-                        rgb = GROUT
-                    else:
-                        rgb = colc.get(idx)
-                        if rgb is None:
-                            tl = tiles[idx]
-                            rgb = tile_color(tl["cx"], tl["cy"], t)
-                            colc[idx] = rgb
+                    mc = colc[idx]
+                    # thin ink line only where two *different colours* abut,
+                    # so flat colour fields read cleanly (no all-over lattice)
+                    rgb = mc
+                    if col + 1 < W:
+                        r = cr[col + 1]
+                        if r != idx and colc[r] != mc:
+                            rgb = INK
+                    if rgb is mc and nr is not None:
+                        d = nr[col]
+                        if d != idx and colc[d] != mc:
+                            rgb = INK
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
                     out.append("█")
                 out.append("\n")
                 last = None
-            out.append(f"\033[38;2;{GROUT[0]};{GROUT[1]};{GROUT[2]}m"
+            out.append(f"\033[38;2;{INK[0]};{INK[1]};{INK[2]}m"
                        "  the hat · Ctrl-C to quit ")
             sys.stdout.write("".join(out))
             sys.stdout.flush()

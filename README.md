@@ -11,7 +11,7 @@ A slow **color-field painting** on a tiling of **"the hat"** — the aperiodic m
 python3 hat.py
 ```
 
-Two slow fields at different scales drive it: a broad one carves paper / ink / colour, a finer one scatters which accent. The tiling is mapped to the screen once, so it runs at hundreds of fps in pure standard library.
+Two slow fields at different scales drive it: a broad one carves paper / ink / colour, a finer one scatters which accent. A thin ink line is drawn only where two *different* colours abut, so the flat colour fields read cleanly instead of dissolving into an all-over lattice. The tiling is mapped to the screen once, so it runs at hundreds of fps in pure standard library.
 
 The tiling geometry lives in `hat_tiling.json` (1,156 hats, baked offline from Craig Kaplan's substitution system).
 
@@ -24,7 +24,7 @@ The tiling geometry lives in `hat_tiling.json` (1,156 hats, baked offline from C
 | `PAPER_LEVEL` | how much of the field stays bare paper (negative space) |
 | `INK_LEVEL` | how readily a shape goes near-black |
 | `ACCENTS` | the accent palette |
-| `PAPER` / `INK` / `GROUT` | ground, black, and the line between tiles |
+| `PAPER` / `INK` | ground color and the outline/weight color |
 
 ### `plasma.py`
 A morphing truecolor plasma field built from layered sine waves, cycling through an HSV color wheel with brightness driving an ASCII intensity ramp.
