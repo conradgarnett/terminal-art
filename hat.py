@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 """
-hat.py — the aperiodic monotile, in an endless Droste zoom.
+hat.py — the aperiodic monotile, slowly spinning.
 
 Renders a tiling of "the spectre" (Smith, Myers, Kaplan & Goodman-
 Strauss's 2023 aperiodic monotile — a single 14-sided shape that tiles
 the plane, never repeats, and needs no reflections, unlike its sibling
-"the hat") and falls into it forever: a seamless infinite zoom with a
-slow rotation, like an Escher staircase for tiles.
+"the hat") and turns it slowly in place like a colored-glass wheel. Every
+tile keeps its own distinct color; the whole palette drifts as it spins.
 
-The illusion: the tiling is drawn at two zoom levels one octave apart and
-crossfaded. As the big octave grows too large and fades out, the small
-one grows into the exact size the big one started at — so the loop never
-shows a seam. A vivid plasma field flows across everything as it spins.
-
-The tiling geometry lives in hat_tiling.json (baked offline from Craig
-Kaplan's substitution system) so this renderer is pure standard library.
+The tiling geometry lives in spectre_tiling.json (baked offline from
+Craig Kaplan's substitution system) so this renderer is pure stdlib.
 
 Run:   python3 hat.py
 Quit:  Ctrl-C
@@ -29,12 +24,10 @@ import sys
 import time
 
 # ---- knobs -----------------------------------------------------------------
-UNITS_ACROSS = 12.0           # world units across the width at the base zoom
+UNITS_ACROSS = 12.0           # world units across the width (lower = bigger tiles)
 FPS = 24
-ZOOM_PERIOD = 2.5             # seconds to zoom out by one octave (2x)
-ZOOM_DIR = -1                 # 1 = fall inward, -1 = pull outward
-ROT_SPEED = 0.5               # steady rotation, radians/sec (0 = no spin)
-TWIST = 0.9                   # log-spiral: twist per e-fold of radius (0 = off)
+ROT_SPEED = 0.4               # spin speed, radians/sec
+TWIST = 0.0                   # log-spiral swirl on top of the spin (0 = rigid)
 PALETTE_SPEED = 0.05          # how fast every tile's color drifts
 SATURATION = 0.9              # color richness (0 = gray, 1 = neon)
 GROUT = (0, 0, 0)             # color of the lines between tiles
@@ -43,14 +36,6 @@ BG = (8, 8, 12)               # color outside the tiling
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "spectre_tiling.json")
 BUCKET = 1.5                  # spatial-hash cell size (~ half a tile)
-
-# 4x4 ordered-dither thresholds: composite the two zoom octaves as a clean
-# stippled dissolve so each cell keeps a real tile's flat color (no muddy
-# blending, no doubled outlines).
-_B4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
-BAYER = [[(v + 0.5) / 16.0 for v in row] for row in _B4]
-BAYER_MIN = 0.5 / 16.0        # below this, no cell picks the small octave
-BAYER_MAX = 15.5 / 16.0       # above this, no cell picks the big octave
 
 
 def hsv_to_rgb(h, s, v):
@@ -70,16 +55,23 @@ def hsv_to_rgb(h, s, v):
 def load_tiles():
     with open(DATA_FILE) as fh:
         data = json.load(fh)
+    raw = [[(float(x), float(y)) for x, y in t["p"]] for t in data["tiles"]]
+    # recenter the whole patch on the origin, which is the spin center --
+    # otherwise the view sits off to one edge and half the screen is empty
+    minx = min(p[0] for pts in raw for p in pts)
+    maxx = max(p[0] for pts in raw for p in pts)
+    miny = min(p[1] for pts in raw for p in pts)
+    maxy = max(p[1] for pts in raw for p in pts)
+    ox, oy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
     tiles = []
-    for t in data["tiles"]:
-        pts = [(float(x), float(y)) for x, y in t["p"]]
+    for pts0 in raw:
+        pts = [(x - ox, y - oy) for x, y in pts0]
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
         tiles.append({
             "pts": pts,
             "cx": sum(xs) / len(xs),
             "cy": sum(ys) / len(ys),
-            "r": bool(t["r"]),
             "bb": (min(xs), max(xs), min(ys), max(ys)),
         })
     return tiles
@@ -233,72 +225,30 @@ def main():
             t = frame * (1.0 / FPS)
             theta = ROT_SPEED * t
 
-            # Two zoom layers staggered by HALF an octave so their resets never
-            # coincide: whichever layer is mid-zoom stays visible while the other
-            # resets out of sight. This is what makes the loop truly seamless --
-            # no jump-back when it zooms all the way out.
+            # single fixed-scale layer: the tiling just spins in place
             s0 = W / UNITS_ACROSS
-            L = t / ZOOM_PERIOD
-            pa = L - math.floor(L)             # layer A phase
-            pb = (L + 0.5) - math.floor(L + 0.5)  # layer B phase (offset 0.5)
-            s_hi = s0 * (2.0 ** (ZOOM_DIR * pa))
-            s_lo = s0 * (2.0 ** (ZOOM_DIR * pb))
-            # show the layer that's furthest from its reset (phase near 0/1);
-            # a flat band keeps most frames on a single layer for speed
-            m = 2.0 * min(pb, 1.0 - pb)
-            if m <= 0.35:
-                w_lo = 0.0
-            elif m >= 0.65:
-                w_lo = 1.0
-            else:
-                u = (m - 0.35) / 0.30
-                w_lo = u * u * (3.0 - 2.0 * u)
-
-            # only build an octave if the dither actually shows any of it
-            idhi = ehi = idlo = elo = None
-            grds = []
-            if w_lo <= BAYER_MAX:
-                chi = -theta + TWIST * math.log(s_hi)
-                idhi = id_grid(PX, PY, math.cos(chi), math.sin(chi),
-                               1.0 / s_hi, W, H)
-                ehi = edges(idhi, W, H)
-                grds.append(idhi)
-            if w_lo > BAYER_MIN:
-                clo = -theta + TWIST * math.log(s_lo)
-                idlo = id_grid(PX, PY, math.cos(clo), math.sin(clo),
-                               1.0 / s_lo, W, H)
-                elo = edges(idlo, W, H)
-                grds.append(idlo)
+            C = -theta + TWIST * math.log(s0)
+            idg = id_grid(PX, PY, math.cos(C), math.sin(C), 1.0 / s0, W, H)
+            eg = edges(idg, W, H)
 
             # one fixed, distinct color per tile: golden-ratio hue spacing so
-            # every hat clashes with its neighbors. Whole palette drifts slowly.
+            # every tile clashes with its neighbors. Whole palette drifts slowly.
             colcache = {-1: BG}
             drift = t * PALETTE_SPEED
-            for grd in grds:
-                for row in grd:
-                    for idx in row:
-                        if idx not in colcache:
-                            hue = (idx * 0.61803398875 + drift) % 1.0
-                            val = 0.62 + 0.38 * ((idx * 0.7548776662) % 1.0)
-                            colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
+            for row in idg:
+                for idx in row:
+                    if idx not in colcache:
+                        hue = (idx * 0.61803398875 + drift) % 1.0
+                        val = 0.62 + 0.38 * ((idx * 0.7548776662) % 1.0)
+                        colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
 
             out = ["\033[H"]
             last = None
             for row in range(H):
-                ih = idhi[row] if idhi else None
-                il = idlo[row] if idlo else None
-                eh = ehi[row] if ehi else None
-                el = elo[row] if elo else None
-                brow = BAYER[row & 3]
+                ig = idg[row]
+                eb = eg[row]
                 for col in range(W):
-                    # pick exactly one octave for this cell -> flat, pure color
-                    if w_lo > brow[col & 3]:
-                        idx = il[col]
-                        ed = el[col]
-                    else:
-                        idx = ih[col]
-                        ed = eh[col]
-                    rgb = GROUT if ed else colcache[idx]
+                    rgb = GROUT if eb[col] else colcache[ig[col]]
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
@@ -306,7 +256,7 @@ def main():
                 out.append("\n")
                 last = None
             out.append("\033[0m\033[38;2;120;120;120m"
-                       "  the spectre · infinite zoom · Ctrl-C to quit ")
+                       "  the spectre · spinning · Ctrl-C to quit ")
             sys.stdout.write("".join(out))
             sys.stdout.flush()
 
