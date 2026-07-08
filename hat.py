@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-hat.py — the aperiodic monotile, in an endless Droste zoom.
+hat.py — a slow color-field painting on the aperiodic monotile.
 
-Renders a tiling of "the hat" (Smith, Myers, Kaplan & Goodman-Strauss's
-2023 aperiodic monotile — a single 13-sided shape that tiles the plane
-but never repeats periodically) and falls into it forever: a seamless
-infinite zoom with a slow rotation, like an Escher staircase for tiles.
-
-The illusion: the tiling is drawn at two zoom levels one octave apart and
-crossfaded. As the big octave grows too large and fades out, the small
-one grows into the exact size the big one started at — so the loop never
-shows a seam. A vivid plasma field flows across everything as it spins.
+A composition built on a tiling of "the hat" (Smith, Myers, Kaplan &
+Goodman-Strauss's 2023 aperiodic monotile — a single 13-sided shape that
+tiles the plane but never repeats). The geometry holds still, like a
+print; only the color moves. A curated flat palette drifts across the
+tiling in slow bands — warm paper as negative space, a few bold accents,
+the occasional near-black shape for weight. Think Matisse cut-outs by way
+of Bauhaus, rendered in a terminal.
 
 The tiling geometry lives in hat_tiling.json (baked offline from Craig
 Kaplan's substitution system) so this renderer is pure standard library.
@@ -27,43 +25,25 @@ import signal
 import sys
 import time
 
-# ---- knobs -----------------------------------------------------------------
-UNITS_ACROSS = 12.0           # world units across the width at the base zoom
-FPS = 24
-ZOOM_PERIOD = 2.5             # seconds to zoom out by one octave (2x)
-ZOOM_DIR = -1                 # 1 = fall inward, -1 = pull outward
-ROT_SPEED = 0.5               # steady rotation, radians/sec (0 = no spin)
-TWIST = 0.9                   # log-spiral: twist per e-fold of radius (0 = off)
-PALETTE_SPEED = 0.05          # how fast every tile's color drifts
-SATURATION = 0.9              # color richness (0 = gray, 1 = neon)
-GROUT = (0, 0, 0)             # color of the lines between tiles
-BG = (8, 8, 12)               # color outside the tiling
+# ---- composition -----------------------------------------------------------
+UNITS_ACROSS = 22.0           # world units across the width (lower = bigger shapes)
+FPS = 20
+SPEED = 1.0                   # overall tempo of the color drift
+PAPER_LEVEL = 0.50            # fraction of the field left as bare paper
+INK_LEVEL = 0.86             # above this a shape goes near-black for weight
+
+PAPER = (234, 228, 214)       # warm off-white ground
+INK = (38, 35, 42)           # near-black
+GROUT = (196, 189, 173)       # quiet line between tiles (a shade under paper)
+ACCENTS = [                   # Bauhaus primaries
+    (211, 83, 61),            # vermilion red
+    (233, 171, 76),           # ochre yellow
+    (58, 74, 122),            # indigo blue
+]
+NACC = len(ACCENTS)
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "hat_tiling.json")
-BUCKET = 1.5                  # spatial-hash cell size (~ half a tile)
-
-# 4x4 ordered-dither thresholds: composite the two zoom octaves as a clean
-# stippled dissolve so each cell keeps a real tile's flat color (no muddy
-# blending, no doubled outlines).
-_B4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
-BAYER = [[(v + 0.5) / 16.0 for v in row] for row in _B4]
-BAYER_MIN = 0.5 / 16.0        # below this, no cell picks the small octave
-BAYER_MAX = 15.5 / 16.0       # above this, no cell picks the big octave
-
-
-def hsv_to_rgb(h, s, v):
-    i = int(h * 6.0)
-    f = h * 6.0 - i
-    p = v * (1.0 - s)
-    q = v * (1.0 - s * f)
-    t = v * (1.0 - s * (1.0 - f))
-    i %= 6
-    r, g, b = [
-        (v, t, p), (q, v, p), (p, v, t),
-        (p, q, v), (t, p, v), (v, p, q),
-    ][i]
-    return int(r * 255), int(g * 255), int(b * 255)
 
 
 def load_tiles():
@@ -78,29 +58,87 @@ def load_tiles():
             "pts": pts,
             "cx": sum(xs) / len(xs),
             "cy": sum(ys) / len(ys),
-            "r": bool(t["r"]),
-            "bb": (min(xs), max(xs), min(ys), max(ys)),
         })
     return tiles
 
 
-def build_hash(tiles):
-    grid = {}
+def point_in_poly(px, py, pts):
+    inside = False
+    j = len(pts) - 1
+    for i in range(len(pts)):
+        xi, yi = pts[i]
+        xj, yj = pts[j]
+        if ((yi > py) != (yj > py)) and \
+           (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def build_map(tiles, W, H):
+    """Assign each cell to a tile, once. Returns (cellmap, edge)."""
+    wcx = sum(t["cx"] for t in tiles) / len(tiles)
+    wcy = sum(t["cy"] for t in tiles) / len(tiles)
+    sx = W / UNITS_ACROSS
+    sy = sx * 0.5  # undistort ~2:1 character cells
+
+    def to_screen(x, y):
+        return ((x - wcx) * sx + W / 2.0, H / 2.0 - (y - wcy) * sy)
+
+    cellmap = [[-1] * W for _ in range(H)]
     for idx, t in enumerate(tiles):
-        x0, x1, y0, y1 = t["bb"]
-        for gx in range(int(x0 // BUCKET), int(x1 // BUCKET) + 1):
-            for gy in range(int(y0 // BUCKET), int(y1 // BUCKET) + 1):
-                grid.setdefault((gx, gy), []).append(idx)
-    return grid
+        spts = [to_screen(x, y) for x, y in t["pts"]]
+        xs = [p[0] for p in spts]
+        ys = [p[1] for p in spts]
+        minx = max(0, int(math.floor(min(xs))))
+        maxx = min(W - 1, int(math.ceil(max(xs))))
+        miny = max(0, int(math.floor(min(ys))))
+        maxy = min(H - 1, int(math.ceil(max(ys))))
+        if minx > maxx or miny > maxy:
+            continue
+        for row in range(miny, maxy + 1):
+            py = row + 0.5
+            crow = cellmap[row]
+            for col in range(minx, maxx + 1):
+                if crow[col] == -1 and point_in_poly(col + 0.5, py, spts):
+                    crow[col] = idx
+
+    # single-width line where a cell's right/down neighbour is another tile
+    edge = [[False] * W for _ in range(H)]
+    for row in range(H):
+        cr = cellmap[row]
+        nr = cellmap[row + 1] if row + 1 < H else None
+        er = edge[row]
+        for col in range(W):
+            me = cr[col]
+            if me == -1:
+                continue
+            if (col + 1 < W and cr[col + 1] != me) or \
+               (nr is not None and nr[col] != me):
+                er[col] = True
+    return cellmap, edge
+
+
+def tile_color(cx, cy, t):
+    """Two fields at different scales: a broad one carves paper/ink/colour,
+    a finer one scatters which accent so colours alternate in blocks."""
+    a = (math.sin(cx * 0.17 + t * 0.045)
+         + math.sin(cy * 0.20 - t * 0.033)
+         + math.sin((cx * 0.6 + cy) * 0.12 + t * 0.040))
+    v = (a + 3.0) / 6.0
+    if v < PAPER_LEVEL:
+        return PAPER
+    if v > INK_LEVEL:
+        return INK
+    b = (math.sin(cx * 0.33 - t * 0.030 + 1.3)
+         + math.sin(cy * 0.38 + t * 0.041 + 2.1)
+         + math.sin((cx - cy * 0.7) * 0.29 - t * 0.035))
+    c = (b + 3.0) / 6.0
+    return ACCENTS[int(c * NACC * 2.0) % NACC]  # *2 breaks spectral order
 
 
 def main():
     tiles = load_tiles()
-    grid = build_hash(tiles)
-    # parallel lists for the hot loop -- list indexing beats dict lookups
-    BB = [t["bb"] for t in tiles]
-    PTS = [t["pts"] for t in tiles]
-
     sys.stdout.write("\033[?25l\033[?1049h")
 
     def cleanup(*_):
@@ -111,114 +149,9 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    def spiral_geometry(W, H):
-        """Per-cell log-spiral constants, rebuilt only when the size changes.
-
-        The world sample for a cell is  world = inv_scale * R(C) * (px, py),
-        where (px, py) folds in the cell's radius and its log-spiral twist and
-        depends only on the cell. That leaves the per-frame hot loop as plain
-        multiply-adds with no trig at all.
-        """
-        cx, cy = W / 2.0, H / 2.0
-        PX = [[0.0] * W for _ in range(H)]
-        PY = [[0.0] * W for _ in range(H)]
-        for row in range(H):
-            dy = -2.0 * (row + 0.5 - cy)  # undistort ~2:1 character cells
-            prx = PX[row]
-            pry = PY[row]
-            for col in range(W):
-                dx = col + 0.5 - cx
-                r = math.hypot(dx, dy)
-                if r < 1e-9:
-                    continue
-                phi = math.atan2(dy, dx) - TWIST * math.log(r)
-                prx[col] = r * math.cos(phi)
-                pry[col] = r * math.sin(phi)
-        return PX, PY
-
-    def id_grid(PX, PY, cosC, sinC, inv_scale, W, H):
-        """Which tile covers each cell, given the per-frame spiral rotation."""
-        g = grid
-        bb = BB
-        pts_all = PTS
-        b = BUCKET
-        floor = math.floor
-        out = [[-1] * W for _ in range(H)]
-        for row in range(H):
-            prx = PX[row]
-            pry = PY[row]
-            orow = out[row]
-            prev = -1  # tile the previous cell landed in (spatial coherence)
-            for col in range(W):
-                px = prx[col]
-                py = pry[col]
-                x = (px * cosC - py * sinC) * inv_scale
-                y = (px * sinC + py * cosC) * inv_scale
-
-                # fast path: is this cell still inside the previous cell's tile?
-                if prev != -1:
-                    x0, x1, y0, y1 = bb[prev]
-                    if x0 <= x <= x1 and y0 <= y <= y1:
-                        pts = pts_all[prev]
-                        inside = False
-                        j = 12
-                        for i in range(13):
-                            xi, yi = pts[i]
-                            xj, yj = pts[j]
-                            if ((yi > y) != (yj > y)) and \
-                               (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
-                                inside = not inside
-                            j = i
-                        if inside:
-                            orow[col] = prev
-                            continue
-
-                bucket = g.get((int(floor(x / b)), int(floor(y / b))))
-                if not bucket:
-                    prev = -1
-                    continue
-                prev = -1
-                for idx in bucket:
-                    x0, x1, y0, y1 = bb[idx]
-                    if x < x0 or x > x1 or y < y0 or y > y1:
-                        continue
-                    pts = pts_all[idx]
-                    inside = False
-                    j = 12
-                    for i in range(13):
-                        xi, yi = pts[i]
-                        xj, yj = pts[j]
-                        if ((yi > y) != (yj > y)) and \
-                           (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
-                            inside = not inside
-                        j = i
-                    if inside:
-                        orow[col] = idx
-                        prev = idx
-                        break
-        return out
-
-    def edges(idg, W, H):
-        e = [[0] * W for _ in range(H)]
-        for row in range(H):
-            ir = idg[row]
-            up = idg[row - 1] if row > 0 else None
-            dn = idg[row + 1] if row + 1 < H else None
-            er = e[row]
-            for col in range(W):
-                me = ir[col]
-                if me == -1:
-                    continue
-                if (col + 1 < W and ir[col + 1] != me) or \
-                   (col > 0 and ir[col - 1] != me) or \
-                   (up is not None and up[col] != me) or \
-                   (dn is not None and dn[col] != me):
-                    er[col] = 1
-        return e
-
-    frame = 0
     size = None
-    PX = PY = None
+    cellmap = edge = None
+    frame = 0
     try:
         while True:
             cols, rows = shutil.get_terminal_size((80, 24))
@@ -226,84 +159,33 @@ def main():
             W = cols
             if (W, H) != size:
                 size = (W, H)
-                PX, PY = spiral_geometry(W, H)
-            t = frame * (1.0 / FPS)
-            theta = ROT_SPEED * t
+                cellmap, edge = build_map(tiles, W, H)
+            t = frame * (SPEED / FPS)
 
-            # Two zoom layers staggered by HALF an octave so their resets never
-            # coincide: whichever layer is mid-zoom stays visible while the other
-            # resets out of sight. This is what makes the loop truly seamless --
-            # no jump-back when it zooms all the way out.
-            s0 = W / UNITS_ACROSS
-            L = t / ZOOM_PERIOD
-            pa = L - math.floor(L)             # layer A phase
-            pb = (L + 0.5) - math.floor(L + 0.5)  # layer B phase (offset 0.5)
-            s_hi = s0 * (2.0 ** (ZOOM_DIR * pa))
-            s_lo = s0 * (2.0 ** (ZOOM_DIR * pb))
-            # show the layer that's furthest from its reset (phase near 0/1);
-            # a flat band keeps most frames on a single layer for speed
-            m = 2.0 * min(pb, 1.0 - pb)
-            if m <= 0.35:
-                w_lo = 0.0
-            elif m >= 0.65:
-                w_lo = 1.0
-            else:
-                u = (m - 0.35) / 0.30
-                w_lo = u * u * (3.0 - 2.0 * u)
-
-            # only build an octave if the dither actually shows any of it
-            idhi = ehi = idlo = elo = None
-            grds = []
-            if w_lo <= BAYER_MAX:
-                chi = -theta + TWIST * math.log(s_hi)
-                idhi = id_grid(PX, PY, math.cos(chi), math.sin(chi),
-                               1.0 / s_hi, W, H)
-                ehi = edges(idhi, W, H)
-                grds.append(idhi)
-            if w_lo > BAYER_MIN:
-                clo = -theta + TWIST * math.log(s_lo)
-                idlo = id_grid(PX, PY, math.cos(clo), math.sin(clo),
-                               1.0 / s_lo, W, H)
-                elo = edges(idlo, W, H)
-                grds.append(idlo)
-
-            # one fixed, distinct color per tile: golden-ratio hue spacing so
-            # every hat clashes with its neighbors. Whole palette drifts slowly.
-            colcache = {-1: BG}
-            drift = t * PALETTE_SPEED
-            for grd in grds:
-                for row in grd:
-                    for idx in row:
-                        if idx not in colcache:
-                            hue = (idx * 0.61803398875 + drift) % 1.0
-                            val = 0.62 + 0.38 * ((idx * 0.7548776662) % 1.0)
-                            colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
-
+            colc = {-1: PAPER}
             out = ["\033[H"]
             last = None
             for row in range(H):
-                ih = idhi[row] if idhi else None
-                il = idlo[row] if idlo else None
-                eh = ehi[row] if ehi else None
-                el = elo[row] if elo else None
-                brow = BAYER[row & 3]
+                cr = cellmap[row]
+                er = edge[row]
                 for col in range(W):
-                    # pick exactly one octave for this cell -> flat, pure color
-                    if w_lo > brow[col & 3]:
-                        idx = il[col]
-                        ed = el[col]
+                    idx = cr[col]
+                    if er[col]:
+                        rgb = GROUT
                     else:
-                        idx = ih[col]
-                        ed = eh[col]
-                    rgb = GROUT if ed else colcache[idx]
+                        rgb = colc.get(idx)
+                        if rgb is None:
+                            tl = tiles[idx]
+                            rgb = tile_color(tl["cx"], tl["cy"], t)
+                            colc[idx] = rgb
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
                     out.append("█")
                 out.append("\n")
                 last = None
-            out.append("\033[0m\033[38;2;120;120;120m"
-                       "  the hat · infinite zoom · Ctrl-C to quit ")
+            out.append(f"\033[38;2;{GROUT[0]};{GROUT[1]};{GROUT[2]}m"
+                       "  the hat · Ctrl-C to quit ")
             sys.stdout.write("".join(out))
             sys.stdout.flush()
 

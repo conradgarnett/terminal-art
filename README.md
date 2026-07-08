@@ -5,30 +5,26 @@ Living, animated art pieces for your terminal. Pure Python standard library — 
 ## Pieces
 
 ### `hat.py`
-An **endless Droste log-spiral zoom** into a tiling of **"the hat"** — the aperiodic monotile discovered by Smith, Myers, Kaplan & Goodman-Strauss in 2023. It's a single 13-sided shape that tiles the plane but *never* repeats periodically. The view pulls outward forever, twisting into a logarithmic spiral. Every hat gets its own fixed distinct color (golden-ratio hue spacing, so neighbors always clash) with a black outline, and the whole palette drifts slowly.
-
-The per-cell spiral geometry is precomputed once and the tile lookup uses a spatial hash plus a same-tile fast path, so it stays smooth (tens of fps) in pure Python even on large terminals.
+A slow **color-field painting** on a tiling of **"the hat"** — the aperiodic monotile discovered by Smith, Myers, Kaplan & Goodman-Strauss in 2023 (a single 13-sided shape that tiles the plane but *never* repeats periodically). The geometry holds still like a print; only the color moves. A curated **Bauhaus palette** — red, yellow, blue, near-black, and warm paper — drifts across the tiling in slow bands: paper as generous negative space, bold flat accents in alternating blocks, the occasional black shape for weight. Matisse cut-outs by way of Bauhaus, in a terminal.
 
 ```bash
 python3 hat.py
 ```
 
-**The illusion:** the tiling is drawn at two zoom levels one octave apart and crossfaded. As the large octave grows too big and fades out, the small one grows into the exact size the large one started at — so the loop is seamless and the zoom never ends. (Verified: the dominant layer is bit-identical across the loop point.)
+Two slow fields at different scales drive it: a broad one carves paper / ink / colour, a finer one scatters which accent. The tiling is mapped to the screen once, so it runs at hundreds of fps in pure standard library.
 
-The tiling geometry lives in `hat_tiling.json` (1,156 hats, baked offline from Craig Kaplan's substitution system) so the renderer itself stays pure standard library.
+The tiling geometry lives in `hat_tiling.json` (1,156 hats, baked offline from Craig Kaplan's substitution system).
 
 **Tunable knobs** at the top of the file:
 
 | Knob | Effect |
 |------|--------|
-| `TWIST` | log-spiral strength — twist per e-fold of radius (`0` = straight zoom) |
-| `ZOOM_PERIOD` | seconds per octave — lower = faster fall inward |
-| `ZOOM_DIR` | `1` = fall inward, `-1` = pull outward |
-| `ROT_SPEED` | steady rotation on top of the spiral (radians/sec) |
-| `UNITS_ACROSS` | base zoom — lower shows fewer, bigger hats |
-| `PALETTE_SPEED` | how fast the whole palette drifts |
-| `SATURATION` | color richness |
-| `GROUT` | color of the lines between tiles |
+| `UNITS_ACROSS` | scale — lower shows fewer, bigger shapes |
+| `SPEED` | tempo of the color drift |
+| `PAPER_LEVEL` | how much of the field stays bare paper (negative space) |
+| `INK_LEVEL` | how readily a shape goes near-black |
+| `ACCENTS` | the accent palette |
+| `PAPER` / `INK` / `GROUT` | ground, black, and the line between tiles |
 
 ### `plasma.py`
 A morphing truecolor plasma field built from layered sine waves, cycling through an HSV color wheel with brightness driving an ASCII intensity ramp.
