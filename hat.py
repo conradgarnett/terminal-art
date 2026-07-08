@@ -43,6 +43,12 @@ DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "hat_tiling.json")
 BUCKET = 4.0                  # spatial-hash cell size (~ one tile wide)
 
+# 4x4 ordered-dither thresholds: composite the two zoom octaves as a clean
+# stippled dissolve so each cell keeps a real tile's flat color (no muddy
+# blending, no doubled outlines).
+_B4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+BAYER = [[(v + 0.5) / 16.0 for v in row] for row in _B4]
+
 
 def hsv_to_rgb(h, s, v):
     i = int(h * 6.0)
@@ -179,8 +185,7 @@ def main():
             f = z - math.floor(z)          # 0..1 within the octave
             s_hi = s0 * (2.0 ** f)         # big octave, fades out
             s_lo = s0 * (2.0 ** (f - 1))   # small octave, fades in
-            w_lo = f * f * (3.0 - 2.0 * f)  # smoothstep crossfade
-            w_hi = 1.0 - w_lo
+            w_lo = f * f * (3.0 - 2.0 * f)  # smoothstep dissolve weight
 
             idhi = id_grid(s_hi, theta, W, H, cx, cy)
             idlo = id_grid(s_lo, theta, W, H, cx, cy)
@@ -203,7 +208,6 @@ def main():
                             else:
                                 colcache[idx] = hsv_to_rgb(hue, SATURATION, val)
 
-            gr0, gr1, gr2 = GROUT
             out = ["\033[H"]
             last = None
             for row in range(H):
@@ -211,24 +215,22 @@ def main():
                 il = idlo[row]
                 eh = ehi[row]
                 el = elo[row]
+                brow = BAYER[row & 3]
                 for col in range(W):
-                    ch = colcache[ih[col]]
-                    cl = colcache[il[col]]
-                    r = w_hi * ch[0] + w_lo * cl[0]
-                    g = w_hi * ch[1] + w_lo * cl[1]
-                    b = w_hi * ch[2] + w_lo * cl[2]
-                    gf = w_hi * eh[col] + w_lo * el[col]
-                    if gf > 0.0:
-                        inv = 1.0 - gf
-                        r = r * inv + gr0 * gf
-                        g = g * inv + gr1 * gf
-                        b = b * inv + gr2 * gf
-                    rgb = (int(r), int(g), int(b))
+                    # pick exactly one octave for this cell -> flat, pure color
+                    if w_lo > brow[col & 3]:
+                        idx = il[col]
+                        ed = el[col]
+                    else:
+                        idx = ih[col]
+                        ed = eh[col]
+                    rgb = GROUT if ed else colcache[idx]
                     if rgb != last:
                         out.append(f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m")
                         last = rgb
                     out.append("█")
                 out.append("\n")
+                last = None
             out.append("\033[0m\033[38;2;120;120;120m"
                        "  the hat · infinite zoom · Ctrl-C to quit ")
             sys.stdout.write("".join(out))
